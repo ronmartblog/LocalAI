@@ -1,0 +1,2740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- LocalAI Studio created by Ron Martinsen March 2026 - ron@martinsen.com - Apache 2.0 License -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Generation — Feature Guide · LocalAI Studio</title>
+  <script>
+  (() => {
+    const param = new URLSearchParams(window.location.search).get("clawpilotTheme");
+    const saved = localStorage.getItem("localai-docs-theme");
+    document.documentElement.setAttribute("data-theme", param || saved || "dark");
+  })();
+</script>
+    <style>
+  /* === Cool-blue design system tokens (mirrors src/model_guide.py) === */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg:           #1a1a2e;
+    --surface:      #16213e;
+    --surface-soft: #1c2a4a;
+    --card:         #0f3460;
+    --card-alt:     #122a55;
+    --border:       #25406e;
+    --border-soft:  #1f3357;
+    --text:         #e7edf5;
+    --text-soft:    #c1cbdc;
+    --muted:        #93a3bd;
+    --accent:       #4f9cf9;
+    --accent-2:     #7ad7ff;
+    --accent-fg:    #0d1117;
+    --accent-soft:  rgba(79,156,249,0.14);
+    --good:         #4caf50;
+    --warn:         #ffb74d;
+    --bad:          #ff7b72;
+    --code-text:    #79c0ff;
+    --code-bg:      #0d1117;
+    --shadow:       0 18px 48px rgba(0,0,0,0.35);
+    --focus-ring:   0 0 0 3px rgba(122,215,255,0.55);
+    /* category palette */
+    --cat-ultrasmall-bg: #1a4a1a; --cat-ultrasmall-fg: #4caf50;
+    --cat-small-bg:      #1a3a4a; --cat-small-fg:      #4f9cf9;
+    --cat-medium-bg:     #3a2a1a; --cat-medium-fg:     #ff9800;
+    --cat-large-bg:      #3a1a1a; --cat-large-fg:      #f44336;
+    --cat-extralarge-bg: #2a1a3a; --cat-extralarge-fg: #ce93d8;
+    --cat-image-bg:      #1a3a3a; --cat-image-fg:      #4dd0e1;
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg:           #f4f7fb;
+    --surface:      #ffffff;
+    --surface-soft: #eef3fb;
+    --card:         #ffffff;
+    --card-alt:     #f1f6ff;
+    --border:       #cbd6e6;
+    --border-soft:  #dbe4f1;
+    --text:         #142036;
+    --text-soft:    #2c3a55;
+    --muted:        #54658a;
+    --accent:       #1864c4;
+    --accent-2:     #1b8fc7;
+    --accent-fg:    #ffffff;
+    --accent-soft:  rgba(24,100,196,0.10);
+    --good:         #2e7d32;
+    --warn:         #b25e00;
+    --bad:          #c0392b;
+    --code-text:    #0b5fa1;
+    --code-bg:      #eef3fb;
+    --shadow:       0 18px 48px rgba(20,32,54,0.10);
+    --focus-ring:   0 0 0 3px rgba(24,100,196,0.40);
+    --cat-ultrasmall-bg: #e1f2e1; --cat-ultrasmall-fg: #2e7d32;
+    --cat-small-bg:      #dfeefa; --cat-small-fg:      #1864c4;
+    --cat-medium-bg:     #fbe9d6; --cat-medium-fg:     #b25e00;
+    --cat-large-bg:      #fbdcdc; --cat-large-fg:      #c0392b;
+    --cat-extralarge-bg: #ecdcf1; --cat-extralarge-fg: #6a1b7a;
+    --cat-image-bg:      #ddf1f4; --cat-image-fg:      #006c75;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* docnav-a11y fix (2026-05-30): JavaScript owns scroll math (see end of body).
+     Section landing position is governed by `scroll-margin-top` on each <section>
+     PLUS this `scroll-padding-top`; setting both to the offset doubled the gap,
+     pushing the section ~half a screen below the sticky header. Keep this at 0;
+     the per-section `scroll-margin-top` still handles native-anchor landings. */
+  html { scroll-behavior: smooth; scroll-padding-top: 0; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+    line-height: 1.7;
+  }
+  :focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
+
+  /* === Skip link === */
+  .skip-link {
+    position: absolute; left: 12px; top: -40px;
+    background: var(--accent); color: var(--accent-fg);
+    padding: 8px 14px; border-radius: 8px; font-weight: 600;
+    z-index: 10000; text-decoration: none;
+  }
+  .skip-link:focus { top: 12px; }
+
+  /* === Page header (sticky) === */
+  header.page-header {
+    background: linear-gradient(135deg, var(--card) 0%, var(--surface) 100%);
+    border-bottom: 2px solid var(--accent);
+    padding: 22px 32px 14px;
+    position: sticky; top: 0; z-index: 60;
+  }
+  header.page-header .wrap { max-width: 1280px; margin: 0 auto; }
+  .header-row {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .header-row h1 {
+    font-size: 1.7rem; letter-spacing: -.02em; color: var(--text);
+    margin: 0;
+  }
+  .header-row .badge {
+    display: inline-block; background: var(--accent); color: var(--accent-fg);
+    border-radius: 999px; padding: 3px 11px; font-size: .78rem;
+    font-weight: 700; vertical-align: middle; margin-left: 6px;
+  }
+  .header-row .spacer { flex: 1; }
+  .header-row .header-sub {
+    color: var(--text-soft); font-size: .95rem; margin-top: 4px;
+    flex-basis: 100%;
+  }
+  .theme-toggle {
+    background: var(--card-alt); color: var(--text);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 7px 14px; font-size: .85rem; font-weight: 600; cursor: pointer;
+  }
+  .theme-toggle:hover { background: var(--accent-soft); border-color: var(--accent); }
+
+  /* === Doc tabs (links to sibling docs styled as tabs) === */
+  .doc-tabs {
+    display: flex; gap: 4px; margin-top: 10px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+  }
+  .doc-tabs a {
+    background: transparent; color: var(--text-soft);
+    text-decoration: none; padding: 8px 16px;
+    border: 1px solid transparent; border-bottom: 0;
+    border-radius: 8px 8px 0 0; font-size: .9rem; font-weight: 600;
+    margin-bottom: -1px;
+  }
+  .doc-tabs a:hover { background: var(--accent-soft); color: var(--accent); }
+  .doc-tabs a[aria-current="page"] {
+    background: var(--bg); color: var(--accent);
+    border-color: var(--border); border-bottom-color: var(--bg);
+  }
+
+  /* === Toolbar (search + density), sticky beneath header === */
+  .toolbar {
+    position: sticky; top: var(--header-h, 150px); z-index: 50;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 10px 32px;
+  }
+  .toolbar .wrap {
+    max-width: 1280px; margin: 0 auto;
+    display: grid; grid-template-columns: 1fr auto auto; gap: 10px;
+    align-items: center;
+  }
+  .search {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--card-alt); border: 1px solid var(--border);
+    border-radius: 10px; padding: 6px 12px;
+  }
+  .search input {
+    flex: 1; background: transparent; border: 0; outline: none;
+    color: var(--text); font-size: .95rem; min-width: 0;
+    font-family: inherit;
+  }
+  .search input::placeholder { color: var(--muted); }
+  .density { display: flex; gap: 4px; }
+  .density button {
+    background: var(--card-alt); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 12px; font-size: .82rem; cursor: pointer;
+    font-family: inherit;
+  }
+  .density button[aria-pressed="true"] {
+    background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
+  }
+  .toolbar-info { color: var(--muted); font-size: .85rem; text-align: right; }
+
+  /* === Shell layout: left rail + content === */
+  .shell {
+    display: grid; grid-template-columns: 250px 1fr;
+    max-width: 1280px; margin: 0 auto; padding: 24px 32px 50px; gap: 32px;
+  }
+  @media (max-width: 980px) {
+    .shell { grid-template-columns: 1fr; padding: 18px 18px 40px; gap: 14px; }
+    .rail { position: static; max-height: none; border-right: 0;
+            border-bottom: 1px solid var(--border); padding: 0 0 14px; margin: 0; }
+  }
+  .rail {
+    position: sticky; top: calc(var(--header-h, 150px) + 64px);
+    align-self: start;
+    max-height: calc(100vh - var(--header-h, 150px) - 88px);
+    overflow: auto; border-right: 1px solid var(--border); padding-right: 14px;
+  }
+  .rail h3 {
+    margin: 0 0 6px; color: var(--accent-2);
+    font-size: .76rem; text-transform: uppercase; letter-spacing: .08em;
+  }
+  .rail ul { list-style: none; margin: 0 0 16px; padding: 0; }
+  .rail li { margin: 0; }
+  .rail a {
+    display: block; color: var(--text-soft); text-decoration: none;
+    font-size: .92rem; padding: 6px 10px; border-radius: 6px;
+    border-left: 2px solid transparent;
+  }
+  .rail a:hover { background: var(--accent-soft); color: var(--accent-2); }
+  .rail a.active {
+    background: var(--accent-soft); color: var(--accent);
+    border-left-color: var(--accent); font-weight: 600;
+  }
+
+  /* === Main content area === */
+  main.content { min-width: 0; }
+  main.content section { margin-bottom: 48px; scroll-margin-top: var(--scroll-offset, 230px); }
+  main.content h2 {
+    margin: 0 0 16px; font-size: 1.5rem; color: var(--accent-2);
+    padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  main.content h3 {
+    margin: 22px 0 8px; font-size: 1.1rem; color: var(--text);
+  }
+  main.content h4 {
+    margin: 16px 0 6px; font-size: 1rem; color: var(--accent);
+  }
+  main.content p { margin: 10px 0; color: var(--text-soft); }
+  main.content a { color: var(--accent-2); text-decoration: none; }
+  main.content a:hover { text-decoration: underline; }
+  main.content ul, main.content ol { margin: 10px 0 14px 22px; padding: 0; }
+  main.content li { margin: 6px 0; color: var(--text-soft); line-height: 1.6; }
+  main.content li strong { color: var(--text); }
+
+  /* === Code === */
+  code {
+    font-family: Consolas, "Courier New", Courier, monospace;
+    background: var(--code-bg); border: 1px solid var(--border);
+    color: var(--code-text); border-radius: 6px;
+    padding: 2px 6px; font-size: .9em;
+  }
+  pre {
+    font-family: Consolas, "Courier New", Courier, monospace;
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 20px; overflow-x: auto;
+    margin: 12px 0; color: var(--text); font-size: .9rem; line-height: 1.6;
+  }
+  pre code { background: transparent; border: 0; padding: 0; color: inherit; }
+  pre .comment { color: var(--muted); }
+  pre .cmd     { color: var(--accent); }
+  pre .string  { color: var(--accent-2); }
+  pre .ok      { color: var(--good); }
+
+  /* === Tables === */
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0; font-size: .92rem;
+    background: var(--card-alt); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+  }
+  th {
+    background: var(--card); color: var(--accent-2);
+    padding: 10px 14px; text-align: left; font-size: .82rem;
+    text-transform: uppercase; letter-spacing: .04em;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 10px 14px; border-bottom: 1px solid var(--border-soft);
+    color: var(--text-soft); vertical-align: top;
+  }
+  tr:last-child td { border-bottom: 0; }
+  tr:hover td { background: var(--accent-soft); }
+
+  /* === Cards === */
+  .card-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px; margin: 16px 0;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.12);
+    transition: border-color 120ms, transform 120ms;
+  }
+  .card:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .card h3, .card h4 {
+    color: var(--accent-2); margin: 0 0 8px; font-size: 1rem;
+  }
+  .card p { margin: 0; color: var(--text-soft); font-size: .92rem; }
+
+  /* === Steps (index.html) === */
+  .steps { counter-reset: step; }
+  .step {
+    display: flex; gap: 16px; margin-bottom: 18px;
+    background: var(--surface-soft); border: 1px solid var(--border-soft);
+    border-radius: 10px; padding: 18px; border-left: 4px solid var(--accent);
+  }
+  .step-num {
+    counter-increment: step; flex-shrink: 0;
+    width: 36px; height: 36px; background: var(--accent);
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 1.05rem; color: var(--accent-fg);
+  }
+  .step-body { min-width: 0; }
+  .step-body h4 { color: var(--text); margin: 0 0 4px; font-size: 1rem; }
+  .step-body p  { color: var(--text-soft); margin: 0; font-size: .95rem; }
+
+  /* === Step-list (image-gen-guide.html numbered list variant) === */
+  .step-list {
+    list-style: none; padding-left: 0; counter-reset: sl; margin: 12px 0;
+  }
+  .step-list li {
+    counter-increment: sl;
+    padding: 10px 14px 10px 52px;
+    position: relative; background: var(--surface-soft);
+    border: 1px solid var(--border-soft); border-radius: 8px;
+    margin-bottom: 8px; color: var(--text-soft);
+  }
+  .step-list li::before {
+    content: counter(sl);
+    position: absolute; left: 12px; top: 50%;
+    transform: translateY(-50%); width: 26px; height: 26px;
+    background: var(--card); border: 2px solid var(--good);
+    border-radius: 50%; color: var(--good); font-weight: 700;
+    font-size: .85rem; display: flex; align-items: center; justify-content: center;
+  }
+
+  /* === Callout / Alert family === */
+  .callout {
+    background: var(--accent-soft); border: 1px solid var(--border);
+    border-left: 4px solid var(--accent); border-radius: 10px;
+    padding: 14px 16px; margin: 14px 0; color: var(--text);
+  }
+  .callout strong { color: var(--text); }
+  .alert {
+    background: var(--surface-soft); border: 1px solid var(--border-soft);
+    border-left: 4px solid var(--accent); border-radius: 10px;
+    padding: 14px 18px; margin: 14px 0; font-size: .95rem; color: var(--text);
+  }
+  .alert p { margin-bottom: 6px; color: var(--text-soft); }
+  .alert p:last-child { margin-bottom: 0; }
+  .alert strong { color: var(--text); }
+  .alert-info, .alert-blue { border-left-color: var(--accent); }
+  .alert-success, .alert-green { border-left-color: var(--good); }
+  .alert-warning, .alert-orange { border-left-color: var(--warn); }
+  .alert-red { border-left-color: var(--bad); }
+  .alert-title {
+    font-size: .76rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .07em;
+    margin-bottom: 8px; color: var(--accent);
+  }
+  .alert.alert-green  .alert-title,
+  .alert.alert-success .alert-title { color: var(--good); }
+  .alert.alert-orange .alert-title,
+  .alert.alert-warning .alert-title { color: var(--warn); }
+  .alert.alert-red    .alert-title { color: var(--bad); }
+
+  /* === Analyze-prompt special callout === */
+  .analyze-callout {
+    background: rgba(76,175,80,0.06); border: 1px solid var(--good);
+    border-left: 4px solid var(--good); border-radius: 10px;
+    padding: 18px 22px; margin: 18px 0; color: var(--text);
+  }
+  .analyze-callout .callout-header {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+  }
+  .analyze-callout .callout-icon { font-size: 1.5rem; line-height: 1; }
+  .analyze-callout .callout-title {
+    font-size: 1.05rem; font-weight: 700; color: var(--good); margin: 0;
+  }
+  .analyze-callout .callout-subtitle {
+    font-size: .85rem; color: var(--muted); margin-top: 2px;
+  }
+  .analyze-callout p { margin: 6px 0; color: var(--text-soft); }
+  .analyze-callout ol { padding-left: 22px; margin: 8px 0; }
+  .analyze-callout li { color: var(--text-soft); margin: 4px 0; }
+
+  /* === Settings box (image-gen-guide) === */
+  .settings-box {
+    background: var(--card-alt); border: 1px solid var(--border);
+    border-left: 4px solid var(--accent); border-radius: 10px;
+    padding: 14px 20px; margin: 14px 0;
+    display: flex; flex-wrap: wrap; gap: 24px;
+  }
+  .settings-box .setting { font-size: .9rem; color: var(--text-soft); }
+  .settings-box .setting span { color: var(--muted); }
+  .settings-box .setting strong { color: var(--text); }
+
+  /* === Feature list (index.html) === */
+  .feature-list {
+    list-style: none; display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px; margin: 12px 0; padding: 0;
+  }
+  .feature-list li {
+    background: var(--surface-soft); border-radius: 8px;
+    padding: 10px 14px; border-left: 3px solid var(--accent);
+    border-top: 1px solid var(--border-soft);
+    border-right: 1px solid var(--border-soft);
+    border-bottom: 1px solid var(--border-soft);
+    font-size: .92rem; color: var(--text);
+  }
+  .feature-list li::before {
+    content: "\2713  "; color: var(--good); font-weight: 700;
+  }
+
+  /* === Category tag chips (index.html) === */
+  .model-cat { margin-bottom: 10px; }
+  .cat-tag {
+    display: inline-block; padding: 2px 9px; border-radius: 6px;
+    font-size: .78rem; font-weight: 700; margin-right: 6px;
+    border: 1px solid var(--border-soft);
+  }
+  .cat-ultrasmall { background: var(--cat-ultrasmall-bg); color: var(--cat-ultrasmall-fg); }
+  .cat-small      { background: var(--cat-small-bg);      color: var(--cat-small-fg); }
+  .cat-medium     { background: var(--cat-medium-bg);     color: var(--cat-medium-fg); }
+  .cat-large      { background: var(--cat-large-bg);      color: var(--cat-large-fg); }
+  .cat-extralarge { background: var(--cat-extralarge-bg); color: var(--cat-extralarge-fg); }
+  .cat-image      { background: var(--cat-image-bg);      color: var(--cat-image-fg); }
+
+  /* === Back link / footer === */
+  .back-link {
+    display: inline-block; color: var(--accent-2); text-decoration: none;
+    font-size: .9rem; margin-bottom: 18px; border: 1px solid var(--border);
+    padding: 6px 12px; border-radius: 999px; background: var(--card-alt);
+  }
+  .back-link:hover { background: var(--accent-soft); border-color: var(--accent); }
+  footer.page-footer {
+    text-align: center; padding: 24px;
+    color: var(--muted); font-size: .85rem;
+    border-top: 1px solid var(--border); margin-top: 36px;
+  }
+  footer.page-footer a { color: var(--accent-2); text-decoration: none; }
+  footer.page-footer a:hover { text-decoration: underline; }
+
+  /* === Empty state (search) === */
+  .empty {
+    padding: 32px; text-align: center; color: var(--muted);
+    background: var(--card-alt); border: 1px solid var(--border);
+    border-radius: 12px; display: none; margin: 12px 0;
+  }
+  .empty.visible { display: block; }
+
+  /* === Density (Compact mode) === */
+  body.compact main.content section { margin-bottom: 30px; }
+  body.compact main.content h2 { font-size: 1.3rem; margin-bottom: 10px; padding-bottom: 6px; }
+  body.compact main.content h3 { font-size: 1.0rem; margin: 14px 0 6px; }
+  body.compact main.content h4 { font-size: .95rem; margin: 12px 0 4px; }
+  body.compact main.content p,
+  body.compact main.content li { font-size: .9rem; line-height: 1.55; }
+  body.compact main.content p { margin: 6px 0; }
+  body.compact .step, body.compact .card, body.compact .alert,
+  body.compact .callout, body.compact .analyze-callout,
+  body.compact .settings-box, body.compact .feature-list li {
+    padding: 10px 14px;
+  }
+  body.compact .step-list li { padding: 6px 12px 6px 46px; }
+  body.compact .card-grid, body.compact .feature-list { gap: 8px; }
+  body.compact th, body.compact td { padding: 6px 10px; }
+  body.compact pre { padding: 10px 14px; }
+  body.compact .prompt-builder { padding: 12px 14px; margin: 10px 0 14px; }
+  body.compact .prompt-builder .pb-grid { gap: 8px 12px; margin-bottom: 12px; }
+  body.compact .prompt-builder select { font-size: .85rem; min-height: 30px; padding: 5px 8px; }
+  body.compact .prompt-builder .pb-preview { font-size: .82rem; padding: 8px 10px; }
+  body.compact .prompt-builder .pb-help { font-size: .76rem; }
+  body.compact .prompt-builder .pb-copy { font-size: .78rem; min-height: 34px; padding: 6px 12px; min-width: 120px; }
+  body.compact .prompt-builder .pb-advanced > summary { padding: 7px 10px; font-size: .78rem; }
+  body.compact .prompt-builder .pb-advanced > summary .pb-summary-hint { font-size: .72rem; }
+  body.compact .prompt-builder .pb-advanced-body { padding: 4px 10px 10px; }
+  body.compact .prompt-builder input[type="text"] { font-size: .85rem; min-height: 30px; padding: 5px 8px; }
+  body.compact .prompt-builder .pb-reset { font-size: .74rem; min-height: 28px; padding: 4px 9px; }
+
+  /* === CFG Scale table === */
+  .cfg-table td:first-child { font-size: 1.05rem; text-align: center; width: 100px; }
+  .cfg-pill {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: .72rem; font-weight: 700; margin-right: 8px;
+    text-transform: uppercase; letter-spacing: .04em;
+    vertical-align: middle; white-space: nowrap;
+  }
+  .cfg-pill.cfg-flux    { background: rgba(79,156,249,.18); color: var(--accent-2); border: 1px solid var(--accent); }
+  .cfg-pill.cfg-soft    { background: rgba(76,175,80,.14);  color: var(--good); border: 1px solid var(--good); }
+  .cfg-pill.cfg-default { background: rgba(122,215,255,.16); color: var(--accent-2); border: 1px solid var(--accent-2); }
+  .cfg-pill.cfg-literal { background: rgba(255,183,77,.16);  color: var(--warn); border: 1px solid var(--warn); }
+  .cfg-pill.cfg-avoid   { background: rgba(255,123,114,.18); color: var(--bad);  border: 1px solid var(--bad); }
+
+  /* === Per-model tip cards: brighter bold for dark-mode contrast === */
+  #model-tips li strong { color: var(--accent-2); }
+  #model-tips h3 { color: var(--accent-2); }
+
+  /* === Timing table cell color codes === */
+  td.green  { color: var(--good); font-weight: 600; }
+  td.orange { color: var(--warn); font-weight: 600; }
+  td.red    { color: var(--bad);  font-weight: 600; }
+
+  @media (max-width: 760px) {
+    header.page-header { padding: 16px 18px 10px; }
+    .toolbar { padding: 8px 18px; }
+    .toolbar .wrap { grid-template-columns: 1fr; }
+    .toolbar-info { text-align: left; }
+    .shell { padding: 14px 18px 36px; }
+    .header-row h1 { font-size: 1.35rem; }
+  }
+
+  /* === Img2img prompt builder (section 5 · Reference Image Generation) ===
+       Accessibility-conformant per WCAG 2.1 AA review (v5.5.14, 2026-05-29):
+       button text uses var(--accent-fg) (passes 4.5:1 on both themes);
+       previews are semantic <output>/<pre>; copy success is announced via
+       a separate role="status" sr-only region — never by mutating the
+       button's accessible name. */
+  .prompt-builder {
+    background: var(--surface-soft);
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin: 16px 0 22px;
+    position: relative;
+  }
+  .prompt-builder .pb-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px 18px;
+    margin-bottom: 18px;
+  }
+  .prompt-builder .pb-field { display: flex; flex-direction: column; gap: 4px; }
+  .prompt-builder .pb-field label {
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .06em;
+    font-weight: 700; color: var(--text-soft);
+  }
+  .prompt-builder select {
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border-soft); border-radius: 6px;
+    padding: 7px 10px; font-family: inherit; font-size: .95rem;
+    min-height: 36px;
+  }
+  .prompt-builder .pb-block { margin-bottom: 14px; }
+  .prompt-builder .pb-block:last-child { margin-bottom: 0; }
+  .prompt-builder .pb-block-label {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 6px;
+  }
+  .prompt-builder .pb-block-title {
+    font-size: .78rem; text-transform: uppercase; letter-spacing: .06em;
+    font-weight: 700; color: var(--text);
+  }
+  .prompt-builder .pb-preview {
+    display: block;
+    background: var(--surface); border: 1px solid var(--border-soft);
+    border-radius: 6px; padding: 10px 12px;
+    font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+    font-size: .9rem; line-height: 1.45; color: var(--text);
+    white-space: pre-wrap; word-break: break-word; user-select: text;
+    margin: 0;
+  }
+  .prompt-builder .pb-copy {
+    background: var(--accent); color: var(--accent-fg);
+    border: 1px solid var(--accent); border-radius: 6px;
+    padding: 8px 14px; font-size: .82rem; font-weight: 600;
+    font-family: inherit; cursor: pointer; letter-spacing: .02em;
+    min-height: 40px; min-width: 140px;
+    transition: background .1s, color .1s, border-color .1s;
+  }
+  .prompt-builder .pb-copy:hover {
+    background: color-mix(in srgb, var(--accent) 88%, black);
+    border-color: color-mix(in srgb, var(--accent) 88%, black);
+    color: var(--accent-fg);
+  }
+  .prompt-builder .pb-copy.copied {
+    background: var(--good); border-color: var(--good);
+    color: var(--accent-fg);
+  }
+  .prompt-builder .pb-copy.copy-failed {
+    background: var(--bad); border-color: var(--bad);
+    color: var(--accent-fg);
+  }
+  .prompt-builder .pb-help {
+    font-size: .82rem; color: var(--text-soft); margin: 8px 0 0;
+  }
+  .prompt-builder .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0;
+    margin: -1px; overflow: hidden; clip: rect(0,0,0,0);
+    white-space: nowrap; border: 0;
+  }
+  /* Advanced (collapsible) section: extra panels users opt into. */
+  .prompt-builder .pb-advanced {
+    margin: 4px 0 18px;
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+  .prompt-builder .pb-advanced > summary {
+    cursor: pointer;
+    padding: 10px 14px;
+    font-size: .85rem;
+    font-weight: 700;
+    color: var(--text);
+    list-style: none;
+    user-select: none;
+    display: flex; align-items: center; gap: 8px;
+    border-radius: 8px;
+  }
+  .prompt-builder .pb-advanced > summary::-webkit-details-marker { display: none; }
+  .prompt-builder .pb-advanced > summary::before {
+    content: "▸"; display: inline-block; color: var(--text-soft);
+    transition: transform .15s ease;
+  }
+  .prompt-builder .pb-advanced[open] > summary::before { transform: rotate(90deg); }
+  .prompt-builder .pb-advanced > summary .pb-summary-hint {
+    color: var(--text-soft); font-weight: 400; font-size: .78rem;
+    margin-left: auto;
+  }
+  .prompt-builder .pb-advanced-body { padding: 4px 14px 14px; }
+  .prompt-builder .pb-advanced-body .pb-grid { margin-bottom: 12px; }
+  .prompt-builder .pb-field-wide { grid-column: 1 / -1; }
+  .prompt-builder input[type="text"] {
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border-soft); border-radius: 6px;
+    padding: 7px 10px; font-family: inherit; font-size: .95rem;
+    min-height: 36px;
+  }
+  .prompt-builder input[type="text"]::placeholder { color: var(--text-soft); opacity: .75; }
+  .prompt-builder .pb-reset {
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border-soft); border-radius: 6px;
+    padding: 6px 12px; font-size: .8rem; font-weight: 600;
+    font-family: inherit; cursor: pointer;
+    min-height: 32px; transition: background .1s, border-color .1s;
+  }
+  .prompt-builder .pb-reset:hover {
+    background: var(--surface-soft);
+    border-color: var(--text-soft);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .prompt-builder .pb-copy,
+    .prompt-builder .pb-reset { transition: none; }
+    .prompt-builder .pb-advanced > summary::before { transition: none; }
+  }
+  @media (forced-colors: active) {
+    .prompt-builder .pb-copy { border: 1px solid ButtonBorder; }
+    .prompt-builder .pb-copy.copied,
+    .prompt-builder .pb-copy.copy-failed {
+      outline: 2px solid Highlight; outline-offset: 2px;
+    }
+    .prompt-builder .pb-preview { border: 1px solid ButtonBorder; }
+    .prompt-builder .pb-advanced { border: 1px solid ButtonBorder; }
+    .prompt-builder .pb-reset { border: 1px solid ButtonBorder; }
+    .prompt-builder input[type="text"] { border: 1px solid ButtonBorder; }
+  }
+</style>
+</head>
+<body>
+
+<a href="#main" class="skip-link">Skip to content</a>
+
+<header class="page-header" id="page-header">
+  <div class="wrap">
+    <div class="header-row">
+      <h1>Image Generation — Feature Guide</h1>
+      <span class="spacer"></span>
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Switch to light theme">☀ Light</button>
+      <p class="header-sub">How every control on the Image Gen page works, plus tips for getting great results.</p>
+    </div>
+  <div class="doc-tabs" role="tablist" aria-label="Documentation set">
+    <a href="index.html" role="tab">Docs Home</a>
+    <a href="Model-Guide.html" role="tab">Model Guide</a>
+    <a href="image-gen-guide.html" role="tab" aria-current="page">Image Gen Guide</a>
+  </div>
+  </div>
+</header>
+
+<div class="toolbar" id="toolbar">
+  <div class="wrap">
+    <label class="search">
+      <span aria-hidden="true">🔍</span>
+      <input id="search" type="search" placeholder="Search this page…" aria-label="Search this page">
+    </label>
+    <div class="density" role="group" aria-label="Density">
+      <button type="button" aria-pressed="true" data-density="comfortable">Comfy</button>
+      <button type="button" aria-pressed="false" data-density="compact">Compact</button>
+    </div>
+    <span class="toolbar-info" id="toolbar-info">Showing all sections</span>
+  </div>
+</div>
+
+<div class="shell">
+<aside class="rail" id="rail" aria-label="Sections on this page">
+  <h3>Getting Started</h3>
+  <ul>
+    <li><a href="#overview"        data-toc-link>1 · Overview</a></li>
+    <li><a href="#comfyui-status"  data-toc-link>2 · ComfyUI Status</a></li>
+    <li><a href="#model-selection" data-toc-link>3 · Model Selection</a></li>
+  </ul>
+  <h3>Prompting</h3>
+  <ul>
+    <li><a href="#analyze-prompt"  data-toc-link>4 · Analyze→Prompt</a></li>
+    <li><a href="#reference-image" data-toc-link>5 · Reference Image Generation</a></li>
+    <li><a href="#prompting"       data-toc-link>6 · Prompting</a></li>
+  </ul>
+  <h3>Generation Controls</h3>
+  <ul>
+    <li><a href="#size-aspect"        data-toc-link>7 · Size &amp; Aspect</a></li>
+    <li><a href="#sampler-scheduler"  data-toc-link>8 · Sampler &amp; Scheduler</a></li>
+    <li><a href="#steps-cfg"          data-toc-link>9 · Steps &amp; CFG Scale</a></li>
+    <li><a href="#seed"               data-toc-link>10 · Seed</a></li>
+    <li><a href="#generating"         data-toc-link>11 · Generating, Stopping, and Saving</a></li>
+  </ul>
+  <h3>Reference</h3>
+  <ul>
+    <li><a href="#model-tips"        data-toc-link>12 · Per-Model Tips</a></li>
+    <li><a href="#troubleshooting"   data-toc-link>13 · Troubleshooting</a></li>
+    <li><a href="#cpu-mode"          data-toc-link>CPU Mode (CPU-only systems)</a></li>
+  </ul>
+</aside>
+<main class="content" id="main">
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 1 — OVERVIEW
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="overview">
+  <h2>1 · Overview</h2>
+
+  <p>LocalAI Studio generates images entirely on your local machine using
+  <strong>ComfyUI</strong> as the generation backend. There are no cloud services
+  involved, no API keys required, and no usage fees — every inference runs on
+  your local GPU.</p>
+
+  <p>Because everything stays on-device your prompts, reference images, and
+  generated outputs never leave your computer. Privacy is absolute.</p>
+
+  <div class="settings-box">
+    <div class="setting"><span>Backend</span><br><strong>ComfyUI</strong></div>
+    <div class="setting"><span>Network required</span><br><strong>No (local only)</strong></div>
+    <div class="setting"><span>API costs</span><br><strong>None</strong></div>
+    <div class="setting"><span>Min GPU VRAM</span><br><strong>4 GB (SD 1.5)</strong></div>
+    <div class="setting"><span>Recommended VRAM</span><br><strong>8–24 GB</strong></div>
+  </div>
+
+  <p>ComfyUI is lazy-started by LocalAI Studio. Generate, Analyze→Prompt, and Restart start or restart it when needed. The
+  status of the ComfyUI process is shown at the bottom of the sidebar — a green
+  &ldquo;Connected&rdquo; indicator means you are ready to go. If ComfyUI is not
+  running, use the <strong>Restart</strong> button in the status bar (described
+  in the next section) to start it.</p>
+
+  <div class="alert alert-orange">
+    <div class="alert-title">Before you start</div>
+    <p>Make sure at least one image model is downloaded. If the Model dropdown
+    is empty, visit the <strong>Models</strong> tab and download a model first.
+    SD 1.5 (2 GB) or Flux Schnell Q4 (6.6 GB) are good starting points.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 2 — COMFYUI STATUS BAR
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="comfyui-status">
+  <h2>2 · ComfyUI Status Bar</h2>
+
+  <p>The status bar at the bottom of the sidebar shows the live state of the
+  ComfyUI process at all times. It also hosts two action buttons.</p>
+
+  <div style="margin-bottom: 24px;">
+    <div class="status-row">
+      <div class="status-dot green"></div>
+      <div>
+        <div class="status-label">Connected &mdash; N checkpoint(s) available</div>
+        <div class="status-desc">ComfyUI is running and has detected N model files. The Model dropdown is populated and you can generate immediately.</div>
+      </div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot orange"></div>
+      <div>
+        <div class="status-label">Checking&hellip;</div>
+        <div class="status-desc">The app is performing its startup probe — polling the ComfyUI API to confirm it is responsive. This normally resolves within a few seconds of launch.</div>
+      </div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot red"></div>
+      <div>
+        <div class="status-label">Not running</div>
+        <div class="status-desc">The ComfyUI process has stopped, crashed, or was never started. Click <strong>Restart</strong> to relaunch it.</div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Action Buttons</h3>
+
+  <div class="alert">
+    <div class="alert-title">Restart Button</div>
+    <p>Kills the existing ComfyUI process (if any) and relaunches it from
+    scratch. Use this if ComfyUI crashes, hangs, stops responding to generation
+    requests, or if you have manually added new model files and want the dropdown
+    to refresh. The restart typically takes 5–15 seconds; status will cycle
+    through <em>Checking&hellip;</em> before returning to
+    <em>Connected</em>.</p>
+  </div>
+
+  <div class="alert alert-green">
+    <div class="alert-title">Free VRAM Button</div>
+    <p>Calls ComfyUI&rsquo;s <code>/free</code> endpoint, which unloads the
+    currently loaded model from GPU memory without restarting the process. This
+    is useful when you want to switch to a significantly larger model — for
+    example, moving from Flux Schnell Q4 to Flux Dev FP16 — and you want to
+    reclaim the VRAM that the previous model is occupying before the next
+    generation loads the new one. You do not need to use this for normal model
+    switching; it is only necessary when VRAM is tight.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 3 — MODEL SELECTION
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="model-selection">
+  <h2>3 · Model Selection</h2>
+
+  <h3>What is a Checkpoint?</h3>
+
+  <p>A <strong>checkpoint</strong> is a file that contains all of the trained
+  weights for a diffusion model — think of it as the "brain" of the image
+  generator. Everything the model has learned about shapes, textures, lighting,
+  faces, and artistic styles is stored inside this single file. Swapping the
+  checkpoint is like swapping the artist: the same prompt can produce
+  dramatically different results depending on which checkpoint is loaded.</p>
+
+  <h4>File Formats</h4>
+  <ul>
+    <li><strong><code>.safetensors</code></strong> — The standard, safe format
+    used by most modern checkpoints. Files are memory-mapped directly into the
+    GPU, so loading is fast and there is no code-execution risk.</li>
+    <li><strong><code>.gguf</code></strong> — A quantized format used primarily
+    by Flux models. Quantization compresses the weights (e.g. to 4-bit or 8-bit
+    integers) so the file is smaller and requires less VRAM, at a small cost in
+    quality. If you see a Flux model listed as <code>.gguf</code>, it is a
+    quantized variant.</li>
+  </ul>
+
+  <h4>Model Families</h4>
+  <ul>
+    <li><strong>SD 1.5</strong> — The original Stable Diffusion architecture.
+    Runs well on low-end hardware (4 GB VRAM), generates at 512×512, and has a
+    massive library of fine-tunes and LoRAs. Best for fast experimentation or
+    machines with limited GPU memory.</li>
+    <li><strong>SDXL</strong> — A larger, more capable architecture that
+    natively generates at 1024×1024. Produces significantly more detailed and
+    photorealistic results than SD 1.5 but requires at least 8 GB VRAM.
+    Models like <em>Juggernaut XL v9</em> and <em>Playground v2.5</em> are SDXL
+    fine-tunes.</li>
+    <li><strong>Flux</strong> — The newest generation of open-source diffusion
+    models (by Black Forest Labs). Flux models excel at prompt adherence and
+    photorealism. The <em>Schnell</em> variant generates in as few as 4 steps;
+    the <em>Dev</em> variant is slower but higher quality. Flux models require
+    10–12 GB VRAM; the <code>.gguf</code> quantized builds run in 6–8 GB.</li>
+    <li><strong>Z-Image</strong> — A newer DiT-style family with a Qwen text
+    encoder. Z-Image Turbo is distilled for short, high-quality runs, uses CFG
+    1.0, and is best treated like Flux: natural-language prompts, 1024×1024,
+    and no negative prompt box.</li>
+    <li><strong>Chroma</strong> — A Flux-architecture family focused on
+    painterly color fidelity and detailed artistic realism. Chroma checkpoints
+    can contain "flux" in their filenames, so LocalAI detects Chroma before
+    generic Flux and prepares its custom support node before generation.</li>
+  </ul>
+
+  <h4>The "In VRAM" Indicator</h4>
+  <p>Next to the Model dropdown you may see an <strong>In VRAM</strong> label.
+  This shows which checkpoint is currently loaded in GPU memory. Loading a
+  checkpoint for the first time can take 10–30 seconds and temporarily spikes
+  GPU memory use. Once loaded, subsequent generations with the same checkpoint
+  are fast because the weights are already on the GPU. If you switch to a
+  different checkpoint, the old one is evicted and the new one is loaded before
+  the next generation begins.</p>
+
+  <div class="callout callout-tip">
+    <strong>VRAM tip:</strong> Larger checkpoints consume more GPU memory and
+    leave less room for the latent canvas and attention maps. If you run out of
+    VRAM mid-generation (which causes an error or a black image), try switching
+    to a smaller or quantized checkpoint, or reduce the output resolution in the
+    <strong>Size</strong> field.
+  </div>
+
+  <p>The <strong>Model</strong> dropdown lists every <code>.safetensors</code>
+  or <code>.gguf</code> checkpoint file that ComfyUI has detected in its
+  <code>models/checkpoints/</code> and <code>models/diffusion_models/</code>
+  directories. Selecting a model does two things: it tells LocalAI Studio which
+  checkpoint to load on the next generation, and it <em>automatically configures
+  optimal defaults</em> for all other settings.</p>
+
+  <h3>Automatic Defaults by Model Family</h3>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Model family</th>
+          <th>Resolution</th>
+          <th>Sampler</th>
+          <th>Scheduler</th>
+          <th>Steps</th>
+          <th>CFG</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SD 1.5<br><span class="note">e.g. <code>v1-5-pruned-emaonly</code>, <code>Realistic_Vision_V6</code></span></td>
+          <td><code>512×512</code></td>
+          <td><code>euler</code></td>
+          <td><code>normal</code></td>
+          <td>20</td>
+          <td>7.0</td>
+        </tr>
+        <tr>
+          <td>SDXL / photorealism<br><span class="note">e.g. <code>sd_xl_base</code>, <code>Juggernaut XL</code>, <code>Playground v2.5</code></span></td>
+          <td><code>1024×1024</code></td>
+          <td><code>dpmpp_2m</code></td>
+          <td><code>karras</code></td>
+          <td>30</td>
+          <td>7.0</td>
+        </tr>
+        <tr>
+          <td>Flux GGUF<br><span class="note">any <code>.gguf</code> or name containing "flux"</span></td>
+          <td><code>1024×1024</code></td>
+          <td><code>euler</code></td>
+          <td><code>simple</code></td>
+          <td>4 (Schnell) / 20 (Dev)</td>
+          <td>1.0</td>
+        </tr>
+        <tr>
+          <td>Z-Image / Z-Image Turbo<br><span class="note">names containing "z_image" or "z-image"</span></td>
+          <td><code>1024×1024</code></td>
+          <td><code>euler</code></td>
+          <td><code>simple</code></td>
+          <td>20 (Z-Image) / 8 (Turbo)</td>
+          <td>1.0</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>You can override any of these defaults after selecting your model. The
+  auto-set values are starting points — experiment freely.</p>
+
+  <h3>All 13 Available Image Models</h3>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Family</th>
+          <th>Size</th>
+          <th>Min RAM</th>
+          <th>Min VRAM</th>
+          <th>Best for</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>SDXL 1.0 Base</strong><br><code>sdxl-base</code></td><td>SDXL</td><td>6.5 GB</td><td>16 GB</td><td>8 GB</td><td>Balanced high-resolution SDXL baseline.</td></tr>
+        <tr><td><strong>Flux.1 Schnell Q4</strong><br><code>flux1-schnell-q4</code></td><td>Flux GGUF</td><td>6.6 GB</td><td>16 GB</td><td>8 GB</td><td>Fast 1-4 step Flux demos with strong prompt adherence.</td></tr>
+        <tr><td><strong>Flux.1 Dev Q4</strong><br><code>flux1-dev-q4</code></td><td>Flux GGUF</td><td>10.0 GB</td><td>20 GB</td><td>10 GB</td><td>Higher-detail Flux output while staying below FP16 memory.</td></tr>
+        <tr><td><strong>Flux.1 Dev FP16</strong><br><code>flux1-dev-fp16</code></td><td>Flux FP16</td><td>23.8 GB</td><td>32 GB</td><td>24 GB</td><td>Maximum Flux quality on 24+ GB VRAM hardware.</td></tr>
+        <tr><td><strong>Juggernaut XL v9</strong><br><code>juggernaut-xl-v9</code></td><td>SDXL fine-tune</td><td>6.6 GB</td><td>16 GB</td><td>8 GB</td><td>Executive-ready cinematic photorealism.</td></tr>
+        <tr><td><strong>Realistic Vision v6.0</strong><br><code>realistic-vision-v6</code></td><td>SD 1.5 fine-tune</td><td>2.0 GB</td><td>8 GB</td><td>4 GB</td><td>Fast photoreal portraits and CPU-viable SD 1.5-family demos.</td></tr>
+        <tr><td><strong>Z-Image Turbo</strong><br><code>z-image-turbo</code></td><td>Z-Image</td><td>12.3 GB</td><td>24 GB</td><td>12 GB</td><td>Distilled high-quality images in about 8 steps.</td></tr>
+        <tr><td><strong>SDXL Lightning</strong><br><code>bytedance-sdxl-lightning</code></td><td>SDXL distilled</td><td>6.9 GB</td><td>16 GB</td><td>8 GB</td><td>Very fast sharp SDXL-style output in a few steps.</td></tr>
+        <tr><td><strong>Playground v2.5 1024px aesthetic</strong><br><code>playgroundai-playground-v2.5-1024px-aesthetic</code></td><td>SDXL aesthetic</td><td>6.5 GB</td><td>16 GB</td><td>8 GB</td><td>Stylized photo-art, color, contrast, and aesthetic compositions.</td></tr>
+        <tr><td><strong>Counterfeit V3.0</strong><br><code>gsdf-counterfeit-v3.0</code></td><td>SD 1.5 anime</td><td>4.0 GB</td><td>16 GB</td><td>4 GB</td><td>Anime and illustration styles on modest GPUs.</td></tr>
+        <tr><td><strong>SDXL Low VRAM</strong><br><code>sdxl-lowvram</code></td><td>SDXL profile</td><td>Uses SDXL Base</td><td>16 GB</td><td>4 GB</td><td>Low-VRAM demonstrations using the SDXL Base checkpoint.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="alert alert-orange">
+    <div class="alert-title">Adding your own models</div>
+    <p>Don&rsquo;t see your model? Drop any <code>.safetensors</code> file into
+    <code>ComfyUI\models\checkpoints\</code> and click <strong>Restart</strong>
+    — it will appear in the dropdown automatically the next time ComfyUI
+    connects.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 4 — ANALYZE REFERENCE IMAGE → PROMPT
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="analyze-prompt">
+  <h2>4 · Analyze Reference Image &rarr; Prompt (img2prompt)</h2>
+
+  <div class="analyze-callout">
+    <div class="callout-header">
+      <div class="callout-icon">&#128065;</div>
+      <div>
+        <div class="callout-title">One-click prompt generation from any photo</div>
+        <div class="callout-subtitle">Powered by the selected local vision model — Gemma 3, MiniCPM-V, Llama 3.2 Vision, and other catalog vision models can run 100% locally</div>
+      </div>
+    </div>
+    <p>The <strong>Analyze &rarr; Prompt</strong> feature lets you point the app at any
+    reference photograph and have a vision AI instantly generate a detailed, model-ready
+    positive prompt. It is the fastest way to recreate a look you love without having to
+    manually describe every element of the image.</p>
+  </div>
+
+  <h3>How it works</h3>
+
+  <ol class="step-list">
+    <li>Click <span class="btn-pill">Browse&hellip;</span> next to the <strong>Reference:</strong> label and select a photo (<code>.png</code>, <code>.jpg</code>, or <code>.jpeg</code>).</li>
+    <li>A thumbnail preview of your selected image appears directly in the UI.</li>
+    <li>Click <span class="btn-pill green">Analyze &rarr; Prompt</span>.</li>
+    <li>The selected vision model analyzes the image in detail and generates a comprehensive, comma-separated positive prompt.</li>
+    <li>The generated prompt is automatically inserted into the <strong>Prompt</strong> textbox — ready to use immediately, or edit as needed.</li>
+  </ol>
+
+  <h3>What the vision model analyzes</h3>
+
+  <p>The model is instructed to examine every visible element of the image and
+  translate it into photographic vocabulary that SDXL and Flux models understand
+  well. This includes:</p>
+
+  <ul>
+    <li><strong>Subject</strong> — appearance, pose, expression, clothing details, accessories</li>
+    <li><strong>Setting and environment</strong> — location, architectural elements, natural features, time of day</li>
+    <li><strong>Lighting</strong> — quality (hard/soft), direction, color temperature, catch lights in eyes, shadow fill</li>
+    <li><strong>Camera perspective</strong> — focal length equivalent, shooting angle (eye-level, low angle, aerial), depth of field</li>
+    <li><strong>Artistic style</strong> — photorealistic, cinematic, illustrated, editorial, documentary, etc.</li>
+    <li><strong>Color palette and mood</strong> — dominant hues, saturation, contrast, overall emotional tone</li>
+  </ul>
+
+  <h3>Prerequisites</h3>
+
+  <div class="alert alert-orange">
+    <div class="alert-title">Vision model required</div>
+    <p>A compatible local vision model, such as Gemma 3, MiniCPM-V, or Llama 3.2 Vision, must be installed for this
+    feature to work. If it is not installed, the <strong>Analyze &rarr; Prompt</strong>
+    button will be disabled and a <strong>Get Model</strong> button will appear next to it.
+    Click <strong>Get Model</strong> to download it directly from the Image Gen page, or
+    go to the <strong>Models</strong> tab, filter by <em>Large</em>, and click
+    <strong>Get Model</strong> on the <em>Llama 3.2 Vision 11B</em> card.
+    Once downloaded, the button activates automatically — no restart needed.</p>
+  </div>
+
+  <h3>Tips for best results</h3>
+
+  <div class="tips">
+    <h3>Analyze &rarr; Prompt tips</h3>
+    <ul>
+      <li><strong>Use a reference as close as possible to your target look.</strong> The closer the reference is to what you want, the less editing the generated prompt will need.</li>
+      <li><strong>Concise, tag-based output.</strong> The vision model generates 15–25 comma-separated tags (up to ~120 tokens). Edit or extend the result as needed before generating.</li>
+      <li><strong>Edit after generating.</strong> The prompt is a starting point, not a final answer. Remove terms that don&rsquo;t apply to your intent, and add specifics about things the image doesn&rsquo;t show but that you want.</li>
+      <li><strong>Best paired with photorealistic SDXL models.</strong> Juggernaut XL v9, SDXL Base, and Playground v2.5 respond well to photographic vocabulary — exactly what the vision model generates.</li>
+      <li><strong>Works with any subject.</strong> Portraits, landscapes, products, architecture, food — the vision model has broad knowledge and will adapt its description vocabulary to the content type.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 5 — REFERENCE IMAGE GENERATION (img2img)
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="reference-image">
+  <h2>5 · Reference Image Generation (img2img)</h2>
+  <p>
+    <strong>Use Reference Image for Generation</strong> tells the SD or SDXL
+    model to start from <em>your</em> photo instead of pure noise. The result
+    keeps the composition, colors, and overall structure of the reference,
+    then restyles it according to your prompt. This is the right tool for
+    &ldquo;same pose, same scene, different lighting&rdquo; or
+    &ldquo;keep this composition but turn it into an oil painting&rdquo;.
+  </p>
+
+  <div class="alert">
+    <div class="alert-title">Not for identity-preserving portraits</div>
+    <p>
+      Reference Image Generation preserves <em>composition</em>, not identity.
+      Faces will resemble the reference loosely but will not be the same
+      person. The SD/SDXL img2img pipeline blends the reference image with
+      your prompt at the denoise strength you pick &mdash; it is not a
+      face-locking workflow, and there is no way inside LocalAI Studio to
+      pin the subject&rsquo;s identity to a specific input photo.
+    </p>
+  </div>
+
+  <h3>Where it is</h3>
+  <p>
+    Under the model picker on the Image Gen page, check
+    <strong>&ldquo;Use reference image for generation&rdquo;</strong>. The
+    checkbox is only enabled for SD 1.5 and SDXL family models (Juggernaut,
+    SDXL Base, Playground v2.5, Realistic Vision, SDXL Lightning, etc.).
+    FLUX, Z-Image Turbo, and Chroma do not support reference-image generation
+    in LocalAI &mdash; the checkbox will read
+    &ldquo;Reference image generation not supported by this model&rdquo;
+    when one of those is selected.
+  </p>
+  <p>
+    Ticking the box also auto-populates the positive and negative prompt
+    fields with a documented reference-image sample (the default selection
+    of the <a href="#img2img-prompt-builder">Prompt builder</a> below), so
+    your very first generation works without typing anything. Switching
+    to a different SD/SDXL checkpoint while the box stays ticked re-applies
+    the same sample, so you always start from a known-good ref-image prompt.
+    Unticking the box restores the selected model&rsquo;s normal demo prompt
+    + default negative.
+  </p>
+
+  <h3 id="img2img-prompt-builder">Prompt builder</h3>
+  <p>
+    You don&rsquo;t need to use this builder for the default sample &mdash;
+    ticking the <strong>&ldquo;Use reference image for generation&rdquo;</strong>
+    checkbox already loads it. Use the dropdowns below only when you want
+    a variation: a woman instead of a man, a different age, different
+    lighting, or different clothing. Click <em>Copy positive</em> to put
+    the result on your clipboard, then paste it into the Image Gen page&rsquo;s
+    positive prompt box; click <em>Copy negative</em> to do the same for
+    the negative prompt box.
+  </p>
+  <p>
+    The fixed tokens at the end of the prompt &mdash;
+    <code>sharp focus, photorealistic, detailed skin texture, 8k</code>
+    &mdash; stay locked because they are what makes the sample reliably
+    photorealistic on every SD/SDXL checkpoint. The Strength slider
+    below is the bigger lever for style changes.
+  </p>
+  <p>
+    The four basic dropdowns are enough for most jobs. Open
+    <strong>Advanced refinements</strong> below them when you want to
+    layer in expression, environment, composition, camera/lens flavour,
+    color grade, skin treatment, facial-hair guards, or your own custom
+    add/avoid phrases. Every advanced field starts at
+    <em>&ldquo;Unspecified&rdquo;</em> so leaving them alone keeps the
+    output identical to the auto-loaded sample.
+  </p>
+  <div class="prompt-builder" role="group"
+       aria-labelledby="img2img-prompt-builder">
+    <div class="pb-grid">
+      <div class="pb-field">
+        <label for="pb-subject">Subject</label>
+        <select id="pb-subject">
+          <option value="man" selected>Man</option>
+          <option value="woman">Woman</option>
+          <option value="person">Person (neutral)</option>
+        </select>
+      </div>
+      <div class="pb-field">
+        <label for="pb-age">Age</label>
+        <select id="pb-age">
+          <option value="20-year-old">20-year-old</option>
+          <option value="30-year-old" selected>30-year-old</option>
+          <option value="40-year-old">40-year-old</option>
+          <option value="50-year-old">50-year-old</option>
+          <option value="60-year-old">60-year-old</option>
+          <option value="70-year-old">70-year-old</option>
+        </select>
+      </div>
+      <div class="pb-field">
+        <label for="pb-clothes">Clothing</label>
+        <select id="pb-clothes">
+          <option value="casual clothes" selected>Casual clothes</option>
+          <option value="business casual attire">Business casual attire</option>
+          <option value="formal business attire">Formal business attire</option>
+          <option value="outdoor activewear">Outdoor activewear</option>
+          <option value="streetwear">Streetwear</option>
+          <option value="winter coat and scarf">Winter coat and scarf</option>
+        </select>
+      </div>
+      <div class="pb-field">
+        <label for="pb-light">Lighting</label>
+        <select id="pb-light">
+          <option value="natural daylight" selected>Natural daylight</option>
+          <option value="golden hour light">Golden hour light</option>
+          <option value="soft window light">Soft window light</option>
+          <option value="studio softbox lighting">Studio softbox lighting</option>
+          <option value="dramatic side lighting">Dramatic side lighting</option>
+          <option value="overcast diffused light">Overcast diffused light</option>
+        </select>
+      </div>
+    </div>
+
+    <details class="pb-advanced">
+      <summary>
+        Advanced refinements
+        <span class="pb-summary-hint">all optional &middot; defaults to nothing</span>
+      </summary>
+      <div class="pb-advanced-body">
+        <div class="pb-grid">
+          <div class="pb-field">
+            <label for="pb-facial">Facial hair</label>
+            <select id="pb-facial">
+              <option value="" selected>Unspecified</option>
+              <option value="clean-shaven">Clean-shaven</option>
+              <option value="trimmed beard">Trimmed beard</option>
+              <option value="full beard">Full beard</option>
+              <option value="goatee">Goatee</option>
+              <option value="mustache only">Mustache only</option>
+            </select>
+          </div>
+          <div class="pb-field">
+            <label for="pb-expression">Expression</label>
+            <select id="pb-expression">
+              <option value="" selected>Unspecified</option>
+              <option value="subtle confident">Subtle confident</option>
+              <option value="warm smile">Warm smile</option>
+              <option value="serious gaze">Serious gaze</option>
+              <option value="contemplative">Contemplative</option>
+              <option value="candid laugh">Candid laugh</option>
+            </select>
+          </div>
+          <div class="pb-field">
+            <label for="pb-environment">Environment</label>
+            <select id="pb-environment">
+              <option value="" selected>Unspecified</option>
+              <option value="studio-dark">Studio backdrop &mdash; deep navy</option>
+              <option value="studio-gray">Studio gray seamless</option>
+              <option value="studio-white">Studio white seamless</option>
+              <option value="office">Modern office (blurred)</option>
+              <option value="street">Urban street (blurred)</option>
+              <option value="forest">Forest path</option>
+              <option value="field">Open field at golden hour</option>
+              <option value="beach">Beach / coast</option>
+              <option value="cafe">Coffeeshop interior</option>
+              <option value="cityscape">Golden-hour cityscape</option>
+            </select>
+          </div>
+          <div class="pb-field">
+            <label for="pb-composition">Composition</label>
+            <select id="pb-composition">
+              <option value="" selected>Unspecified</option>
+              <option value="headshot">Headshot</option>
+              <option value="midshot">Mid-shot (waist up)</option>
+              <option value="threequarter">Three-quarter</option>
+              <option value="fullbody">Full body</option>
+            </select>
+          </div>
+          <div class="pb-field">
+            <label for="pb-camera">Camera body</label>
+            <select id="pb-camera">
+              <option value="" selected>Unspecified</option>
+              <option value="sony-a7r4">Sony A7R IV</option>
+              <option value="canon-r5">Canon EOS R5</option>
+              <option value="nikon-z9">Nikon Z9</option>
+              <option value="leica-sl2">Leica SL2</option>
+              <option value="hasselblad-x2d">Hasselblad X2D (medium format)</option>
+            </select>
+          </div>
+          <div class="pb-field">
+            <label for="pb-lens">Lens</label>
+            <select id="pb-lens">
+              <option value="" selected>Unspecified</option>
+              <option value="35mm">35mm f/1.4 &mdash; environmental</option>
+              <option value="50mm">50mm f/1.8 &mdash; natural perspective</option>
+              <option value="85mm">85mm f/1.4 &mdash; classic headshot</option>
+              <option value="105mm">105mm f/2 &mdash; tight portrait</option>
+              <option value="135mm">135mm f/2 &mdash; beauty headshot</option>
+            </select>
+          </div>
+          <div class="pb-field">
+            <label for="pb-mood">Mood / color grade</label>
+            <select id="pb-mood">
+              <option value="" selected>Unspecified</option>
+              <option value="editorial">Editorial cinematic</option>
+              <option value="daylight">Natural daylight</option>
+              <option value="moody">Moody desaturated</option>
+              <option value="highkey">High-key bright</option>
+              <option value="vintage">Vintage film</option>
+              <option value="punchy">Punchy magazine</option>
+            </select>
+          </div>
+          <div class="pb-field">
+            <label for="pb-quality">Quality preset</label>
+            <select id="pb-quality">
+              <option value="" selected>Unspecified</option>
+              <option value="editorial8k">Editorial 8k matte</option>
+              <option value="natmatte">Natural matte</option>
+              <option value="beauty">Beauty smooth</option>
+            </select>
+          </div>
+          <div class="pb-field pb-field-wide">
+            <label for="pb-custom-add">Custom additions (appended to positive)</label>
+            <input type="text" id="pb-custom-add" autocomplete="off"
+                   placeholder="e.g. silver wire-rim glasses, slight head turn to camera-left" />
+          </div>
+          <div class="pb-field pb-field-wide">
+            <label for="pb-custom-avoid">Custom avoidances (appended to negative)</label>
+            <input type="text" id="pb-custom-avoid" autocomplete="off"
+                   placeholder="e.g. red clothing, harsh ring-flash reflections" />
+          </div>
+        </div>
+        <button type="button" id="pb-reset-advanced" class="pb-reset">Reset advanced</button>
+      </div>
+    </details>
+
+    <div class="pb-block">
+      <div class="pb-block-label">
+        <span class="pb-block-title">Positive prompt</span>
+        <button type="button" id="pb-copy-positive" class="pb-copy">Copy positive</button>
+      </div>
+      <output id="pb-positive-preview" class="pb-preview"
+              for="pb-subject pb-age pb-clothes pb-light pb-facial pb-expression pb-environment pb-composition pb-camera pb-lens pb-mood pb-quality pb-custom-add"></output>
+    </div>
+
+    <div class="pb-block">
+      <div class="pb-block-label">
+        <span class="pb-block-title">Negative prompt</span>
+        <button type="button" id="pb-copy-negative" class="pb-copy">Copy negative</button>
+      </div>
+      <pre id="pb-negative-preview" class="pb-preview"></pre>
+      <p class="pb-help">
+        With nothing in Advanced refinements, the negative is the same
+        for every combination &mdash; it tells SD/SDXL what to avoid
+        (bad anatomy, blur, cartoon style, watermarks). When you pick an
+        advanced option that has its own avoidance set (facial hair,
+        environment, quality preset, etc.) those extra phrases are
+        appended here automatically.
+      </p>
+    </div>
+
+    <div id="pb-copy-status" class="sr-only" role="status"></div>
+  </div>
+
+  <h3>The Strength slider</h3>
+  <p>
+    Strength is the denoise value &mdash; how much the model is allowed to
+    change the reference. Lower values stay closer to the original; higher
+    values give the prompt more freedom.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Strength</th><th>Effect</th><th>When to use it</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>0.30</strong></td>
+        <td>Subtle restyle &mdash; original is clearly visible</td>
+        <td>Color grading, mood shift, minor cleanup</td>
+      </tr>
+      <tr>
+        <td><strong>0.55</strong> (default)</td>
+        <td>Restyle while preserving composition</td>
+        <td>The everyday sweet spot &mdash; new style, same scene</td>
+      </tr>
+      <tr>
+        <td><strong>0.85</strong></td>
+        <td>Heavy restyle &mdash; only rough layout survives</td>
+        <td>Major medium changes (photo &rarr; painting, etc.)</td>
+      </tr>
+      <tr>
+        <td><strong>1.00</strong></td>
+        <td>Reference is ignored entirely</td>
+        <td>Same as turning the feature off</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    LocalAI starts you at <strong>0.55</strong> instead of the historical
+    0.75, because at 0.75 the reference barely contributes &mdash; you end
+    up with text-to-image with vague inspiration. Your last value is
+    remembered across restarts.
+  </p>
+
+  <h3>Match reference aspect (recommended)</h3>
+  <p>
+    The <strong>Match reference aspect</strong> checkbox under the slider
+    automatically snaps the output width and height to the closest standard
+    bucket for the reference photo&rsquo;s aspect ratio at queue time. This
+    fixes the most common failure mode: when the reference is a
+    9&times;16 portrait and the target is 1024&times;1024 square, the
+    workflow center-crops the reference &mdash; cutting the subject&rsquo;s
+    head out of the frame. With aspect-match on, a 9&times;16 reference
+    becomes 768&times;1344, a 16&times;9 becomes 1344&times;768, and a
+    2&times;3 becomes 832&times;1216 &mdash; all standard SDXL buckets the
+    refiner was trained on.
+  </p>
+  <p>
+    Turn it off if you want to deliberately re-frame the composition
+    yourself (e.g., square crop of a portrait reference).
+  </p>
+
+  <h3>Lightning / Turbo and reference images</h3>
+  <p>
+    Four-to-eight step fast checkpoints (SDXL Lightning, SDXL Turbo,
+    Z-Image Turbo&rsquo;s SDXL siblings) cannot recover from high-denoise
+    noise &mdash; the output turns to mush above ~0.85. LocalAI silently
+    clamps the strength to 0.85 in that case and notes it once in the
+    progress strip, so the reference is preserved even if your slider
+    happens to be all the way up.
+  </p>
+
+  <h3>Tips</h3>
+  <ul>
+    <li><strong>Start at 0.55, adjust from there.</strong> If the reference is too
+    dominant, raise it; if your prompt isn&rsquo;t showing up at all, raise it.
+    If the reference is being ignored, lower it.</li>
+    <li><strong>Composition over content.</strong> Reference Image Generation is
+    about pose, framing, and color &mdash; not about preserving a person&rsquo;s
+    face. Faces drift toward whatever the prompt describes; there is no
+    face-locking workflow in LocalAI Studio.</li>
+    <li><strong>Pair with Analyze &rarr; Prompt.</strong> Run Analyze &rarr; Prompt
+    on your reference first to get a baseline description, then refine it
+    before generating &mdash; the two features compose well.</li>
+    <li><strong>Use the same aspect as your reference.</strong> Leave
+    &ldquo;Match reference aspect&rdquo; on unless you specifically want a
+    different crop.</li>
+  </ul>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 6 — PROMPTING
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="prompting">
+  <h2>6 · Prompting</h2>
+  <div class="alert">
+    <div class="alert-title">Need a wow demo prompt?</div>
+    <p>Open <a href="Model-Guide.html"><strong>Image Gen Prompt Ideas</strong></a> for model-specific, click-to-copy prompts that match the image model you are demoing.</p>
+  </div>
+
+  <h3>Positive Prompt</h3>
+
+  <p>The positive prompt describes what you want to appear in the image. The
+  ideal prompt style differs significantly by model family — using the wrong
+  style for a model reduces quality noticeably.</p>
+
+  <h4>SD 1.5 — Tag-based style</h4>
+  <p>SD 1.5 was trained predominantly on short, comma-separated tag lists in the
+  style of image-board metadata. This style still works best:</p>
+  <div class="settings-box">
+    <div class="setting" style="flex:1;">
+      <span>Example positive prompt</span><br>
+      <code>portrait of a knight, full armor, forest, golden hour, artstation, highly detailed, 8k</code>
+    </div>
+  </div>
+  <p>Quality booster tags that reliably improve SD 1.5 output:</p>
+  <div class="chip-list">
+    <span class="chip">highly detailed</span>
+    <span class="chip">artstation</span>
+    <span class="chip">8k</span>
+    <span class="chip">masterpiece</span>
+    <span class="chip">best quality</span>
+    <span class="chip">sharp focus</span>
+    <span class="chip">cinematic lighting</span>
+    <span class="chip">trending on artstation</span>
+  </div>
+
+  <h4>SDXL &amp; photorealism models — Natural language</h4>
+  <p>SDXL and its fine-tunes (Juggernaut XL v9, Playground v2.5) were trained on
+  captioned images with natural language descriptions. Write as if briefing a
+  photographer:</p>
+  <div class="settings-box">
+    <div class="setting" style="flex:1;">
+      <span>Example positive prompt</span><br>
+      <code>A professional portrait of a woman in her 40s, natural makeup, soft studio lighting, Sony 85mm, shallow depth of field</code>
+    </div>
+  </div>
+  <p>Photorealism keywords that boost quality with SDXL fine-tunes:</p>
+  <div class="chip-list">
+    <span class="chip">RAW photo</span>
+    <span class="chip">DSLR</span>
+    <span class="chip">85mm portrait lens</span>
+    <span class="chip">shallow depth of field</span>
+    <span class="chip">photorealistic</span>
+    <span class="chip">skin pores detail</span>
+    <span class="chip">natural lighting</span>
+    <span class="chip">film grain</span>
+    <span class="chip">catch lights in eyes</span>
+  </div>
+
+  <h4>Flux — Photo caption style</h4>
+  <p>Flux models understand prompts written exactly as you would describe a real
+  photograph. Skip shorthand tags entirely and write in complete, descriptive
+  sentences:</p>
+  <div class="settings-box">
+    <div class="setting" style="flex:1;">
+      <span>Example positive prompt</span><br>
+      <code>A fisherman in a yellow rain jacket standing on a dock at golden hour, salt-and-pepper mustache, weathered face, bokeh harbor lights in background</code>
+    </div>
+  </div>
+  <p>Flux handles text embedded in images (signage, book covers, labels) far
+  better than SD or SDXL models — if you need legible text in the image, use a
+  Flux model.</p>
+
+  <h3>Negative Prompt</h3>
+
+  <p>Describes what to <strong>exclude</strong> from the image. The negative
+  prompt is effective for SD 1.5 and SDXL models. For Flux models, it is
+  largely ignored — leave it blank when using Flux.</p>
+
+  <div class="settings-box">
+    <div class="setting" style="flex:1;">
+      <span>Common negative prompt (SD 1.5 &amp; SDXL)</span><br>
+      <code>ugly, deformed, extra limbs, bad anatomy, blurry, watermark, text, low quality, oversaturated</code>
+    </div>
+  </div>
+
+  <div class="tips">
+    <h3>Prompting tips</h3>
+    <ul>
+      <li><strong>Match the prompt style to the model family.</strong> Tag-heavy prompts work well for SD 1.5; natural language sentences work better for SDXL and Flux.</li>
+      <li><strong>Describe lighting explicitly.</strong> &ldquo;Golden hour sidelight&rdquo;, &ldquo;soft overcast diffusion&rdquo;, &ldquo;dramatic Rembrandt lighting&rdquo; all shift the output significantly across all model families.</li>
+      <li><strong>Name camera and lens for Flux.</strong> Including specific gear like <code>Sony A7IV, 85mm f/1.4</code> or <code>Leica Q3</code> shifts the aesthetic noticeably.</li>
+      <li><strong>Be specific about what you don&rsquo;t want.</strong> For SD 1.5/SDXL, negative prompts like <code>extra fingers, bad anatomy</code> help avoid common artifacts in hands and faces.</li>
+      <li><strong>Longer is fine for SDXL and Flux.</strong> Unlike SD 1.5, SDXL and Flux models have larger text encoders and respond well to long, richly detailed prompts.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 6 — SIZE AND ASPECT RATIO
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="size-aspect">
+  <h2>7 · Size and Aspect Ratio</h2>
+
+  <p>Width &times; Height in pixels. The aspect ratio preset buttons give you
+  one-click access to the most commonly used compositions. You can also type
+  custom values directly into the Width and Height fields.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Preset</th>
+          <th>Resolution</th>
+          <th>Best for</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Square 1:1</strong></td>
+          <td><code>1024×1024</code></td>
+          <td>Portraits, product shots, social media avatars</td>
+        </tr>
+        <tr>
+          <td><strong>Landscape 16:9</strong></td>
+          <td><code>1344×768</code></td>
+          <td>Cinematic scenes, desktop wallpapers, wide establishing shots</td>
+        </tr>
+        <tr>
+          <td><strong>Landscape 3:2</strong></td>
+          <td><code>1216×832</code></td>
+          <td>Photography style, editorial spreads</td>
+        </tr>
+        <tr>
+          <td><strong>Portrait 9:16</strong></td>
+          <td><code>768×1344</code></td>
+          <td>Full-body portraits, mobile wallpapers, vertical social content</td>
+        </tr>
+        <tr>
+          <td><strong>Portrait 2:3</strong></td>
+          <td><code>832×1216</code></td>
+          <td>Editorial portraits, fashion, book covers</td>
+        </tr>
+        <tr>
+          <td><strong>Wide 21:9</strong></td>
+          <td><code>1536×640</code></td>
+          <td>Ultra-wide cinematic, panoramic landscapes</td>
+        </tr>
+        <tr>
+          <td><strong>SD 512</strong></td>
+          <td><code>512×512</code></td>
+          <td>SD 1.5 native resolution — fastest, best quality for SD 1.5</td>
+        </tr>
+        <tr>
+          <td><strong>SD 768</strong></td>
+          <td><code>768×768</code></td>
+          <td>SD 1.5 larger square — better detail than 512, still fast</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="alert alert-red">
+    <div class="alert-title">Resolution must match the model family</div>
+    <p><strong>SD 1.5 and Realistic Vision V6</strong> generate best at
+    512–768 px. Generating these models at 1024 px produces elongated,
+    artifact-prone images with anatomical distortions — the model was not
+    trained at that resolution.</p>
+    <p><strong>SDXL and Flux</strong> are trained natively at 1024 px.
+    Generating them at 512 px produces noticeably worse composition and detail.
+    Never go below 768 px on the short side for these models.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 7 — SAMPLER AND SCHEDULER
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="sampler-scheduler">
+  <h2>8 · Sampler and Scheduler</h2>
+
+  <p>The <strong>sampler</strong> is the mathematical algorithm that
+  progressively removes noise from the latent image across the denoising steps.
+  Different samplers make different tradeoffs between speed, determinism, and
+  creative variation. The <strong>scheduler</strong> controls the noise level
+  curve — how aggressively the noise decreases from step to step.</p>
+
+  <h3>Samplers</h3>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Sampler</th>
+          <th>Character</th>
+          <th>Best used with</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>euler</code></td>
+          <td>Simple, reliable, fast</td>
+          <td>Flux (required), SD 1.5 general use</td>
+        </tr>
+        <tr>
+          <td><code>euler_ancestral</code></td>
+          <td>Adds randomness each step; more varied results</td>
+          <td>SD 1.5 creative/artistic use, illustration styles</td>
+        </tr>
+        <tr>
+          <td><code>dpmpp_2m</code></td>
+          <td>Fast convergence, high quality, deterministic</td>
+          <td>SDXL and photorealism fine-tunes (auto-set default)</td>
+        </tr>
+        <tr>
+          <td><code>dpmpp_2m_sde</code></td>
+          <td>Stochastic variant of dpmpp_2m; more creative variation</td>
+          <td>SDXL when you want more diversity between seeds</td>
+        </tr>
+        <tr>
+          <td><code>dpmpp_sde</code></td>
+          <td>Slower but high quality; excels at complex textures</td>
+          <td>Complex scenes where quality matters more than speed</td>
+        </tr>
+        <tr>
+          <td><code>ddim</code></td>
+          <td>Deterministic, consistent outputs</td>
+          <td>Img2img, inpainting (consistent latent space)</td>
+        </tr>
+        <tr>
+          <td><code>uni_pc</code></td>
+          <td>High quality, good efficiency</td>
+          <td>SD 1.5 and SDXL when fewer steps are needed</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Schedulers</h3>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Scheduler</th>
+          <th>Character</th>
+          <th>Use with</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>normal</code></td>
+          <td>Linear noise decay, stable and predictable</td>
+          <td>SD 1.5 default</td>
+        </tr>
+        <tr>
+          <td><code>karras</code></td>
+          <td>Improved noise schedule; better detail retention</td>
+          <td>SDXL + dpmpp_2m — the best photorealism combination</td>
+        </tr>
+        <tr>
+          <td><code>simple</code></td>
+          <td>Uniform step spacing tuned for Flux&rsquo;s rectified flow</td>
+          <td>Flux models only — do not use with SD or SDXL</td>
+        </tr>
+        <tr>
+          <td><code>exponential</code></td>
+          <td>Faster early noise removal</td>
+          <td>Experimental; try with dpmpp_2m for variety</td>
+        </tr>
+        <tr>
+          <td><code>sgm_uniform</code></td>
+          <td>Uniform steps in the SGM formulation</td>
+          <td>Experimental alternative to normal for SD 1.5</td>
+        </tr>
+        <tr>
+          <td><code>beta</code></td>
+          <td>Beta-distribution noise schedule</td>
+          <td>Experimental; can improve fine detail in some models</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Recommended Combinations</h3>
+
+  <div class="settings-box" style="flex-direction: column; gap: 12px;">
+    <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+      <span style="color:var(--muted); min-width:180px;">SD 1.5</span>
+      <code>euler</code> + <code>normal</code>
+      <span class="note">or</span>
+      <code>euler_ancestral</code> + <code>karras</code>
+    </div>
+    <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+      <span style="color:var(--muted); min-width:180px;">SDXL / photorealism</span>
+      <code>dpmpp_2m</code> + <code>karras</code>
+      <span class="note" style="color:var(--green);">&larr; auto-set when you select an SDXL model</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+      <span style="color:var(--muted); min-width:180px;">Flux (all variants)</span>
+      <code>euler</code> + <code>simple</code>
+      <span class="note" style="color:var(--green);">&larr; auto-set when you select a Flux model</span>
+    </div>
+  </div>
+
+  <div class="alert alert-red">
+    <div class="alert-title">Do not mix Flux scheduler with SD/SDXL</div>
+    <p>Using <code>simple</code> scheduler with SD 1.5 or SDXL, or using
+    <code>karras</code>/<code>normal</code> with Flux, produces grey, noisy, or
+    completely black images. If your output looks wrong, check that the sampler
+    and scheduler match the model family first.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 8 — STEPS AND CFG
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="steps-cfg">
+  <h2>9 · Steps and CFG Scale</h2>
+
+  <h3>Steps</h3>
+
+  <p>Steps is the number of denoising iterations the sampler performs. Each
+  step refines the image further. More steps generally means a more refined,
+  detailed result — but with diminishing returns above each model&rsquo;s
+  recommended range, and at the cost of generation time.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Model family</th>
+          <th>Recommended steps</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Flux Schnell</td>
+          <td class="green"><strong>4</strong></td>
+          <td>Trained for exactly 4 steps — more steps do not help and can degrade quality</td>
+        </tr>
+        <tr>
+          <td>Flux Dev</td>
+          <td><strong>20</strong></td>
+          <td>Up to 30 for very complex scenes; returns diminish above 30</td>
+        </tr>
+        <tr>
+          <td>SD 1.5</td>
+          <td><strong>20–30</strong></td>
+          <td>20 is fine; 25–30 adds sharpness and fine detail</td>
+        </tr>
+        <tr>
+          <td>SDXL / photorealism</td>
+          <td><strong>30</strong></td>
+          <td>25–40 for maximum detail; 30 is the sweet spot</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>CFG Scale (Classifier-Free Guidance)</h3>
+
+  <p>CFG controls how strictly the model follows your text prompt versus
+  exercising its own creative freedom. At low values the model interprets the
+  prompt loosely; at high values it interprets it very literally, which can
+  cause visual artifacts if taken too far.</p>
+
+  <div class="table-wrap">
+    <table class="cfg-table">
+      <thead>
+        <tr>
+          <th>CFG Value</th>
+          <th>Behavior</th>
+          <th>When to use</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>1.0</strong></td>
+          <td><span class="cfg-pill cfg-flux">Flux required</span> Distilled guidance — the model handles steering internally.</td>
+          <td>Every Flux model (Schnell, Dev Q4, Dev FP16) and Z-Image Turbo. The app auto-sets this.</td>
+        </tr>
+        <tr>
+          <td><strong>5 – 6</strong></td>
+          <td><span class="cfg-pill cfg-soft">Soft adherence</span> Creative — the model interprets the prompt loosely.</td>
+          <td>SD / SDXL when you want a softer, more atmospheric look or are exploring composition.</td>
+        </tr>
+        <tr>
+          <td><strong>7.0</strong></td>
+          <td><span class="cfg-pill cfg-default">SD / SDXL default</span> Balanced — the sweet spot for prompt-following without artifacts.</td>
+          <td>Default for SD 1.5, Realistic Vision, SDXL Base, Juggernaut XL, Playground v2.5.</td>
+        </tr>
+        <tr>
+          <td><strong>8 – 10</strong></td>
+          <td><span class="cfg-pill cfg-literal">Literal</span> Model follows the prompt very strictly; can start to oversaturate.</td>
+          <td>When you need precise control over every detail. Stay below 10 to avoid artifacts.</td>
+        </tr>
+        <tr>
+          <td><strong>&gt; 10</strong></td>
+          <td><span class="cfg-pill cfg-avoid">Avoid</span> Burnt, oversaturated, or colour-shifted output.</td>
+          <td>Don't. If you're tempted to go this high, rewrite the prompt or pick a different sampler instead.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="alert alert-red">
+    <div class="alert-title">CFG and Flux — critical</div>
+    <p>Flux models use a guidance-distilled training approach that requires CFG
+    to be set to <strong>1.0</strong>. Setting CFG higher than 1.0 on a Flux
+    model will produce overexposed, burnt, or colour-shifted images. The app
+    auto-sets CFG to 1.0 when you select a Flux model — do not increase it.</p>
+  </div>
+
+  <div class="tips">
+    <h3>Steps &amp; CFG tips</h3>
+    <ul>
+      <li><strong>CFG 7.0 is the right default for SD/SDXL.</strong> You can experiment with 5–6 for softer, more atmospheric results, or 8–9 for very literal prompt following — but stay below 10.</li>
+      <li><strong>Flux Schnell at exactly 4 steps.</strong> Adding more steps is counterproductive — Schnell is distilled specifically for 4-step generation and does not benefit from additional steps.</li>
+      <li><strong>Bump up SDXL steps for detail.</strong> Going from 30 to 35–40 steps with <code>dpmpp_2m</code> + <code>karras</code> on SDXL Base, Playground v2.5, or Juggernaut produces noticeably sharper fine detail in hair and fabric textures.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 9 — SEED
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="seed">
+  <h2>10 · Seed</h2>
+
+  <p>The seed is an integer that initializes the random noise tensor used at
+  the very first step of generation. Because the entire denoising process is
+  deterministic given the same starting noise, the same seed paired with the
+  same prompt and settings will produce an identical image every single time.</p>
+
+  <div class="settings-box">
+    <div class="setting">
+      <span>Default value</span><br>
+      <strong>&minus;1 (random)</strong>
+    </div>
+    <div class="setting">
+      <span>Reproducible result</span><br>
+      <strong>Any positive integer</strong>
+    </div>
+    <div class="setting">
+      <span>Seed range</span><br>
+      <strong>0 – 2&thinsp;147&thinsp;483&thinsp;647</strong>
+    </div>
+  </div>
+
+  <h3>Workflow</h3>
+
+  <ul>
+    <li><strong>Use &minus;1 to explore.</strong> A new random seed is picked on every generation, giving you a different composition, lighting interpretation, and facial structure each time you click Generate. This is the best mode for early-stage exploration.</li>
+    <li><strong>Lock a seed to refine.</strong> Once you find a composition or character you like, note the seed that produced it (shown in the status bar / generation output), and enter that exact number into the Seed field. You can now iterate on the prompt, CFG, or steps while keeping the same underlying spatial structure.</li>
+    <li><strong>Small seed changes, large output changes.</strong> Seeds that are numerically close (e.g., 1000 and 1001) produce completely different images — they are not interpolations of each other.</li>
+    <li><strong>Seed is model-specific.</strong> The same seed produces different images across different model checkpoints because the latent spaces differ.</li>
+  </ul>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 10 — GENERATING, STOPPING, SAVING
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="generating">
+  <h2>11 · Generating, Stopping, and Saving</h2>
+
+  <h3>Generate</h3>
+
+  <p>Clicking <span class="btn-pill green">Generate</span> queues the current
+  workflow in ComfyUI. A progress bar appears showing the current step out of
+  the total steps. Generation typically takes:</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2">Model + settings</th>
+          <th colspan="4" style="text-align:center">Estimated generation time</th>
+        </tr>
+        <tr>
+          <th>GPU Entry<br><small style="opacity:.75">4 GB VRAM</small></th>
+          <th>GPU Mid<br><small style="opacity:.75">8 GB VRAM</small></th>
+          <th>GPU High<br><small style="opacity:.75">12 GB VRAM</small></th>
+          <th>GPU Workstation<br><small style="opacity:.75">24 GB VRAM</small></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SD 1.5 / Realistic Vision — 20 steps, 512×768</td>
+          <td class="orange">30–60 s</td>
+          <td class="green">15–25 s</td>
+          <td class="green">10–18 s</td>
+          <td class="green">8–15 s</td>
+        </tr>
+        <tr>
+          <td>SDXL Lightning — 4 steps, 1024×1024</td>
+          <td class="red">N/A</td>
+          <td class="green">15–25 s</td>
+          <td class="green">10–15 s</td>
+          <td class="green">6–12 s</td>
+        </tr>
+        <tr>
+          <td>Flux Schnell Q4 — 4 steps, 1024×1024</td>
+          <td class="red">N/A</td>
+          <td class="orange">30–50 s</td>
+          <td>20–35 s</td>
+          <td class="green">10–20 s</td>
+        </tr>
+        <tr>
+          <td>SDXL Base / Playground v2.5 — 30 steps, 1024×1024</td>
+          <td class="red">N/A</td>
+          <td class="orange">90–150 s</td>
+          <td>50–90 s</td>
+          <td class="green">25–45 s</td>
+        </tr>
+        <tr>
+          <td>Juggernaut XL — 30 steps, 1344×768</td>
+          <td class="red">N/A</td>
+          <td class="orange">100–160 s</td>
+          <td>55–95 s</td>
+          <td class="green">30–55 s</td>
+        </tr>
+        <tr>
+          <td>Z-Image Turbo — 8 steps, 1024×1024</td>
+          <td class="red">N/A</td>
+          <td class="red">N/A</td>
+          <td>30–50 s</td>
+          <td class="green">18–30 s</td>
+        </tr>
+        <tr>
+          <td>Flux Dev Q4 — 20 steps, 1024×1024</td>
+          <td class="red">N/A</td>
+          <td class="red">N/A</td>
+          <td class="orange">2–4 min <sup>*</sup></td>
+          <td class="orange">50–90 s</td>
+        </tr>
+        <tr>
+          <td>Flux Dev FP16 — 20 steps, 1024×1024</td>
+          <td class="red">N/A</td>
+          <td class="red">N/A</td>
+          <td class="red">N/A — requires 24 GB VRAM</td>
+          <td class="orange">1.5–3 min</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="note">Practical planning ranges based on GPU VRAM. Match your local GPU by the VRAM amount shown in each column header. Times vary by driver, power state, and whether the model is already loaded. First generation after a model switch includes load time; subsequent generations at the same checkpoint are faster. <sup>*</sup>Flux Dev Q4 on a 12 GB GPU is borderline — expect long renders if other apps share the VRAM.</p>
+
+  <h3>Stop</h3>
+
+  <p>Clicking <span class="btn-pill red">Stop</span> sends an interrupt signal
+  to the ComfyUI queue. Generation will halt at the next step boundary. A
+  partially denoised image may or may not render depending on how far along the
+  process was when the interrupt arrived. Use Stop if you realize your prompt
+  needs adjustment and don&rsquo;t want to wait for the full generation to
+  complete.</p>
+
+  <h3>Save Image&hellip;</h3>
+
+  <p>Clicking <span class="btn-pill">Save Image&hellip;</span> opens a system
+  save dialog pre-populated with a descriptive filename that includes the model
+  name, resolution, step count, and CFG value — for example:
+  <code>JuggernautXL_1024x1024_steps30_cfg7.0.png</code>. Images are saved as
+  PNG, which is lossless. You can save to any location on your system.</p>
+
+  <div class="alert">
+    <div class="alert-title">Unsaved images</div>
+    <p>Generated images are held in memory and displayed in the preview area.
+    They are <strong>not</strong> automatically saved to disk. If you generate
+    a new image without saving the current one, the previous result will be
+    replaced. Save any image you want to keep before generating again.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 11 — PER-MODEL TIPS
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="model-tips">
+  <h2>12 · Per-Model Tips</h2>
+
+  <!-- SD 1.5 + Realistic Vision -->
+  <div style="background: var(--surface); border-radius: 10px; padding: 20px 24px; margin-bottom: 20px; border: 1px solid #2a2a4a;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap;">
+      <h3 style="margin:0;">SD 1.5 &amp; Realistic Vision V6</h3>
+      <span class="tag tag-vram">4 GB VRAM</span>
+      <span class="tag tag-res">512×768</span>
+      <span class="tag tag-speed">Fast</span>
+    </div>
+    <ul>
+      <li><strong>Realistic Vision V6 is dramatically more photorealistic than vanilla SD 1.5.</strong> For any portrait or people photography intent, always choose Realistic Vision V6 over the base SD 1.5 model.</li>
+      <li><strong>Add RAW photo keywords to the positive prompt:</strong> <code>RAW photo, DSLR, photorealistic, skin pores detail</code> significantly improves facial realism in Realistic Vision.</li>
+      <li><strong>Use the negative prompt aggressively.</strong> Adding <code>painting, illustration, cartoon, anime, 3D render</code> prevents Realistic Vision from drifting toward illustrative styles.</li>
+      <li><strong>512×768 is ideal for portrait orientation.</strong> This matches the aspect ratio of typical portrait photography and stays close to the model&rsquo;s native 512 px training resolution.</li>
+      <li><strong>CFG 6–7 for faces.</strong> Slightly lower CFG (6.0–6.5) tends to produce more natural facial proportions and avoids the over-sharpened look that appears above CFG 8.</li>
+      <li><strong>euler_ancestral gives more varied results</strong> than euler at the cost of being slightly less deterministic between runs with the same seed.</li>
+    </ul>
+  </div>
+
+  <!-- SDXL Base -->
+  <div style="background: var(--surface); border-radius: 10px; padding: 20px 24px; margin-bottom: 20px; border: 1px solid #2a2a4a;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap;">
+      <h3 style="margin:0;">SDXL 1.0 Base</h3>
+      <span class="tag tag-vram">8 GB VRAM</span>
+      <span class="tag tag-res">1024×1024</span>
+      <span class="tag tag-speed">Moderate</span>
+    </div>
+    <ul>
+      <li><strong>Use natural language sentences, not tag lists.</strong> SDXL was trained on descriptive captions; tag-heavy prompts still work but produce slightly less cohesive compositions.</li>
+      <li><strong>Add <code>photorealistic</code> for more realistic results</strong>, or deliberately omit it to lean into SDXL&rsquo;s natural illustrative and graphic art strengths — SDXL Base has a distinctive stylized quality that is aesthetically strong for creative/artistic images.</li>
+      <li><strong>1024×1024 is the native resolution.</strong> Never generate SDXL at 512 px — the native training resolution is 1024 and quality degrades noticeably below 768 px on the short side.</li>
+      <li><strong>Landscape 16:9 (1344×768) works well</strong> for wide scenes, architectural shots, and cinematic compositions.</li>
+    </ul>
+  </div>
+
+  <!-- Playground + Juggernaut -->
+  <div style="background: var(--surface); border-radius: 10px; padding: 20px 24px; margin-bottom: 20px; border: 1px solid #2a2a4a;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap;">
+      <h3 style="margin:0;">Playground v2.5 &amp; Juggernaut XL v9</h3>
+      <span class="tag tag-vram">8 GB VRAM</span>
+      <span class="tag tag-res">1024×1024</span>
+      <span class="tag tag-speed">Moderate</span>
+    </div>
+    <ul>
+      <li><strong>These are specialized photorealism fine-tunes of SDXL</strong> and produce dramatically more realistic results than SDXL Base for people, skin textures, and outdoor scenes.</li>
+      <li><strong>Works exceptionally well with the Analyze &rarr; Prompt feature.</strong> The vision model generates photographic vocabulary (lens types, lighting descriptions, camera references) that these models are specifically trained to respond to.</li>
+      <li><strong>For portraits:</strong> add <code>shallow depth of field, 85mm portrait lens, skin pores detail, catch lights in eyes</code> to the positive prompt to push the model toward its photorealistic strength.</li>
+      <li><strong>Juggernaut XL v9 vs Playground v2.5:</strong> Juggernaut tends to produce better results for cinematic photoreal scenes; Playground v2.5 excels at stylized photo-art, color, contrast, and aesthetic compositions.</li>
+      <li><strong>dpmpp_2m + karras is already auto-set</strong> — do not change the sampler/scheduler unless you have a specific reason to.</li>
+      <li><strong>35–40 steps</strong> pushes noticeably more fine detail into hair, fabric, and skin textures at the cost of ~5–10 extra seconds per generation.</li>
+    </ul>
+  </div>
+
+  <!-- Flux Schnell / Dev -->
+  <div style="background: var(--surface); border-radius: 10px; padding: 20px 24px; margin-bottom: 20px; border: 1px solid #2a2a4a;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap;">
+      <h3 style="margin:0;">Flux.1 Schnell / Dev / Dev FP16</h3>
+      <span class="tag tag-vram">8–24 GB VRAM</span>
+      <span class="tag tag-res">1024×1024</span>
+      <span class="tag tag-speed">Fast–Slow</span>
+    </div>
+    <ul>
+      <li><strong>CFG must be 1.0 — do not increase it.</strong> Flux uses guidance distillation; raising CFG above 1.0 burns and overexposes the output.</li>
+      <li><strong>No negative prompt needed.</strong> Flux models largely ignore negative prompts. Leave the negative prompt field blank.</li>
+      <li><strong>Write prompts as photo captions.</strong> Describe the image exactly as if writing a detailed caption for a real photograph: <code>A macro photograph of a bee on a lavender flower, golden afternoon backlight, Sony FE 90mm macro</code></li>
+      <li><strong>Flux handles text in images far better than SD/SDXL.</strong> If you need legible text rendered in the image (signs, book covers, labels, product packaging), use a Flux model.</li>
+      <li><strong>Schnell for speed, Dev for quality.</strong> Use Flux Schnell Q4 for rapid iteration at 4 steps, then switch to Flux Dev Q4 or FP16 for final quality renders at 20+ steps.</li>
+      <li><strong>Flux Dev FP16</strong> is the highest quality model in LocalAI Studio. Use it only for final renders — it requires 24 GB VRAM and is significantly slower.</li>
+    </ul>
+  </div>
+  <div style="background: var(--surface); border-radius: 10px; padding: 20px 24px; margin-bottom: 20px; border: 1px solid #2a2a4a;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap;">
+      <h3 style="margin:0;">Z-Image Turbo</h3>
+      <span class="tag tag-vram">12 GB VRAM</span>
+      <span class="tag tag-res">1024×1024</span>
+      <span class="tag tag-speed">Fast</span>
+    </div>
+    <ul>
+      <li><strong>Keep CFG at 1.0.</strong> Z-Image Turbo is distilled like Flux-family models; higher CFG values waste VRAM and can degrade output.</li>
+      <li><strong>Use natural-language prompts.</strong> Write a clear caption-style description instead of SD 1.5 tag piles.</li>
+      <li><strong>Use the Turbo default step count.</strong> The catalog defaults are tuned for about 8 steps; adding many more steps rarely improves results.</li>
+      <li><strong>Leave negative prompt blank.</strong> CFG-locked distilled families ignore or underuse negative prompts, so use positive phrasing instead.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SECTION 12 — TROUBLESHOOTING
+════════════════════════════════════════════════════════════════════════════ -->
+<section id="troubleshooting">
+  <h2>13 · Troubleshooting</h2>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Problem</th>
+          <th>Solution</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>ComfyUI shows "Not running"</strong></td>
+          <td>Click the <span class="btn-pill">Restart</span> button in the status bar. If it still fails, run <code>setup.bat</code> from the LocalAI Studio installation folder to reinstall ComfyUI dependencies.</td>
+        </tr>
+        <tr>
+          <td><strong>"No checkpoints found" in the model dropdown</strong></td>
+          <td>No model files have been downloaded yet. Visit the <strong>Models</strong> tab and download at least one image model, then click Restart to reload ComfyUI.</td>
+        </tr>
+        <tr>
+          <td><strong>Image is grey / black / pure noise</strong></td>
+          <td>Wrong sampler or scheduler for the model — especially Flux models generated with <code>karras</code> or <code>normal</code> scheduler instead of <code>simple</code>. Select your model again from the dropdown to re-apply the correct defaults.</td>
+        </tr>
+        <tr>
+          <td><strong>Image is overexposed, washed out, or burnt</strong></td>
+          <td>CFG value is too high. For Flux models, set CFG to exactly <strong>1.0</strong>. For SD/SDXL models, reduce CFG to 7.0 or lower.</td>
+        </tr>
+        <tr>
+          <td><strong>Flux model not appearing in the dropdown</strong></td>
+          <td>Flux GGUF models require the <strong>ComfyUI-GGUF</strong> custom node. Download the Flux model from the Models tab — it installs the required node automatically. Click Restart afterward.</td>
+        </tr>
+        <tr>
+          <td><strong>GGUF or Flux generation shows no progress for several minutes</strong></td>
+          <td>First-run GGUF dequantization, custom-node startup, or Flux compilation can be quiet even when ComfyUI is still working. Keep the job running unless the canvas reports a timeout/error or ComfyUI exits. Subsequent runs are usually faster after the support path is warm.</td>
+        </tr>
+        <tr>
+          <td><strong>"Analyze &rarr; Prompt" button is greyed-out or fails</strong></td>
+          <td>The selected vision model is not installed. Open the Models tab, install a Vision model such as Gemma 3, MiniCPM-V, or Llama 3.2 Vision, then return to Image Gen.</td>
+        </tr>
+        <tr>
+          <td><strong>Generation is very slow</strong></td>
+          <td>Try one or more of: (1) click <span class="btn-pill">Free VRAM</span> and regenerate, (2) switch to a quantized model (e.g., Flux Dev Q4 instead of FP16), (3) reduce Steps (Flux Schnell at 4 steps is the fastest option), (4) reduce resolution using the <strong>SD 512</strong> or <strong>SD 768</strong> preset for SD 1.5 models.</td>
+        </tr>
+        <tr>
+          <td><strong>Out of memory / generation crashes</strong></td>
+          <td>The model requires more VRAM than is available. Click <span class="btn-pill">Free VRAM</span> first, then try generating again. If it still fails, switch to a smaller model (Flux Schnell Q4 at 8 GB, or Realistic Vision V6 at 4 GB).</td>
+        </tr>
+        <tr>
+          <td><strong>Hands / fingers look deformed</strong></td>
+          <td>A common limitation of diffusion models. For SD/SDXL: add <code>extra fingers, malformed hands, bad anatomy</code> to the negative prompt. For Flux: add <code>anatomically correct, natural human proportions, five fingers on each hand</code> to the positive prompt. Changing the seed often helps too.</td>
+        </tr>
+        <tr>
+          <td><strong>Model doesn&rsquo;t appear after dropping it into checkpoints</strong></td>
+          <td>ComfyUI must be restarted to scan for new files. Click the <span class="btn-pill">Restart</span> button and wait for the status to return to Connected. The new model should then appear in the dropdown.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+
+
+<section id="cpu-mode">
+  <h2>CPU mode for CPU-only systems</h2>
+  <div class="alert alert-orange">
+    <div class="alert-title">CPU OK means slow but usable</div>
+    <p>For machines without a dedicated GPU (integrated-graphics-only laptops and desktops), LocalAI can still drive a small set of image models on the CPU. CPU image generation is intended for explicitly <code>cpu_viable</code> SD 1.5-family catalog entries such as Realistic Vision and Counterfeit. Flux, SDXL, Z-Image, and other larger families still need a GPU for a good experience.</p>
+    <p>Expect long renders in CPU mode. The app shows CPU OK badges and a slow-render banner so users understand this is a compatibility path, not the fastest path.</p>
+  </div>
+</section>
+
+</main>
+</div>
+
+<div class="empty" id="empty" role="status" aria-live="polite">No sections match your search.</div>
+
+<footer class="page-footer">
+  <a href="index.html">LocalAI Studio Docs</a> &middot;
+  <a href="Model-Guide.html">Model Guide</a> &middot;
+  <a href="image-gen-guide.html">Image Gen Guide</a>
+  <br>
+  <span>LocalAI Studio v5.3.4 &middot; Ron Martinsen &middot; Apache 2.0 License</span>
+</footer>
+
+<script>
+  const root = document.documentElement;
+  const btn = document.getElementById("theme-toggle");
+  function setThemeLabel() {
+    const isDark = root.getAttribute("data-theme") === "dark";
+    if (btn) {
+      btn.textContent = isDark ? "☀ Light" : "🌙 Dark";
+      btn.setAttribute("aria-label", isDark ? "Switch to light theme" : "Switch to dark theme");
+    }
+  }
+  setThemeLabel();
+  if (btn) {
+    btn.addEventListener("click", () => {
+      const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("localai-docs-theme", next); } catch (e) {}
+      setThemeLabel();
+    });
+  }
+
+  function updateStickyOffset() {
+    const hdr = document.getElementById("page-header");
+    const tb = document.getElementById("toolbar");
+    if (!hdr) return;
+    const headerH = hdr.offsetHeight;
+    const toolbarH = tb ? tb.offsetHeight : 0;
+    document.documentElement.style.setProperty("--header-h", headerH + "px");
+    document.documentElement.style.setProperty("--scroll-offset", (headerH + toolbarH + 20) + "px");
+  }
+  updateStickyOffset();
+  if ("ResizeObserver" in window) {
+    const ro = new ResizeObserver(updateStickyOffset);
+    ro.observe(document.getElementById("page-header"));
+    const tbel = document.getElementById("toolbar");
+    if (tbel) ro.observe(tbel);
+  } else {
+    window.addEventListener("resize", updateStickyOffset);
+  }
+
+  const sections = document.querySelectorAll("main.content > section[id]");
+  const railLinks = document.querySelectorAll("#rail a[data-toc-link]");
+  function highlightActive() {
+    const hdr = document.getElementById("page-header");
+    const tb = document.getElementById("toolbar");
+    const offset = (hdr ? hdr.offsetHeight : 0) + (tb ? tb.offsetHeight : 0) + 12;
+    let current = "";
+    sections.forEach(s => { if (s.getBoundingClientRect().top - offset <= 0) current = s.id; });
+    railLinks.forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#" + current));
+  }
+  window.addEventListener("scroll", highlightActive, { passive: true });
+  setTimeout(highlightActive, 50);
+
+  const searchEl = document.getElementById("search");
+  const emptyEl = document.getElementById("empty");
+  const info = document.getElementById("toolbar-info");
+  const totalSections = sections.length;
+  function applySearch(q) {
+    q = q.trim().toLowerCase();
+    let visible = 0;
+    sections.forEach(s => {
+      const hit = !q || s.textContent.toLowerCase().includes(q);
+      s.style.display = hit ? "" : "none";
+      if (hit) visible++;
+    });
+    if (emptyEl) emptyEl.classList.toggle("visible", visible === 0 && !!q);
+    if (info) {
+      info.textContent = q
+        ? `${visible} section${visible === 1 ? "" : "s"} match "${q}"`
+        : `Showing all ${totalSections} sections`;
+    }
+    railLinks.forEach(a => {
+      const id = a.getAttribute("href").slice(1);
+      const sec = document.getElementById(id);
+      a.style.opacity = (sec && sec.style.display === "none") ? "0.35" : "1";
+    });
+  }
+  if (searchEl) {
+    let debounceId = null;
+    searchEl.addEventListener("input", e => {
+      clearTimeout(debounceId);
+      debounceId = setTimeout(() => applySearch(e.target.value), 200);
+    });
+  }
+
+  document.querySelectorAll(".density button").forEach(b => {
+    b.addEventListener("click", () => {
+      document.querySelectorAll(".density button").forEach(x => x.setAttribute("aria-pressed", "false"));
+      b.setAttribute("aria-pressed", "true");
+      document.body.classList.toggle("compact", b.dataset.density === "compact");
+      try { localStorage.setItem("localai-docs-density", b.dataset.density); } catch (e) {}
+      updateStickyOffset();
+    });
+  });
+  try {
+    const savedDensity = localStorage.getItem("localai-docs-density");
+    if (savedDensity === "compact") {
+      const cBtn = document.querySelector('.density button[data-density="compact"]');
+      if (cBtn) cBtn.click();
+    }
+  } catch (e) {}
+</script>
+
+<script>
+  (() => {
+    const NEGATIVE_TEXT = "deformed, distorted, disfigured, extra fingers, bad anatomy, malformed limbs, mutated hands, blurry, low quality, jpeg artifacts, oversaturated, cartoon, anime, painting, sketch, 3d render, watermark, signature, text";
+    const buildPositive = (age, subject, clothes, light) =>
+      `professional photograph of a ${age} ${subject} wearing ${clothes}, ${light}, sharp focus, photorealistic, detailed skin texture, 8k`;
+
+    // Per-option positive + negative chunks for the Advanced section.
+    // Key = the <option value="..."> string; empty key = "Unspecified".
+    const FACIAL = {
+      "":                { pos: "", neg: "" },
+      "clean-shaven":    { pos: "with a clean-shaven face, defined jawline",
+                           neg: "beard, mustache, goatee, stubble, scruff, facial hair, patchy beard" },
+      "trimmed beard":   { pos: "with a well-groomed short trimmed beard, defined jawline",
+                           neg: "patchy beard, uneven beard, missing beard patches, scruffy stubble" },
+      "full beard":      { pos: "with a full natural beard with even coverage",
+                           neg: "patchy beard, uneven beard, scraggly beard" },
+      "goatee":          { pos: "with a neat trimmed goatee and clean cheeks",
+                           neg: "full beard, mustache wider than goatee, patchy facial hair" },
+      "mustache only":   { pos: "with a neat trimmed mustache and a clean-shaven chin",
+                           neg: "beard, goatee, stubble on the cheeks, scruffy chin" },
+    };
+    const EXPRESSION = {
+      "":                  { pos: "", neg: "" },
+      "subtle confident":  { pos: "subtle confident expression, lips closed in a relaxed natural pose",
+                             neg: "open mouth, exaggerated grin, teeth showing, fake smile, awkward expression" },
+      "warm smile":        { pos: "warm genuine smile, eyes lit up with the smile, soft natural laugh lines around the eyes",
+                             neg: "forced smile, fake smile, awkward grin, frown" },
+      "serious gaze":      { pos: "serious calm gaze directly at the camera, composed thoughtful expression",
+                             neg: "smiling, grinning, open mouth, laughing" },
+      "contemplative":     { pos: "contemplative thoughtful expression, slight asymmetry suggesting natural focus, gaze just off-camera",
+                             neg: "blank stare, vacant expression, dazed" },
+      "candid laugh":      { pos: "candid mid-laugh expression, eyes crinkled with genuine joy, mouth open in a natural laugh",
+                             neg: "fake laugh, forced expression, stiff posture" },
+    };
+    const ENVIRONMENT = {
+      "":             { pos: "", neg: "" },
+      "studio-dark":  { pos: "soft studio backdrop in deep navy blue fading to near-black in the corners, smooth seamless paper backdrop with natural vignette falloff",
+                        neg: "circular halo behind head, blue disc background, vignette circle, spotlight ring, geometric background shape, outdoor scenery" },
+      "studio-gray":  { pos: "smooth neutral gray studio backdrop, even seamless paper, soft natural falloff",
+                        neg: "outdoor scenery, daylight, harsh sun, busy background, geometric shapes" },
+      "studio-white": { pos: "clean white studio backdrop, smooth seamless paper, bright but not blown out",
+                        neg: "outdoor scenery, daylight, harsh sun, busy background, gray cast, color cast" },
+      "office":       { pos: "modern minimal office interior with floor-to-ceiling windows softly blurred in the background, muted neutral tones, depth of field separating subject from background",
+                        neg: "cluttered office, busy background, sharply focused background, outdoor scenery" },
+      "street":       { pos: "urban street scene softly blurred behind the subject, warm city lights and architectural lines rendered as bokeh, shallow depth of field, evening light",
+                        neg: "sharp background, cluttered foreground, indoor scene, studio backdrop" },
+      "forest":       { pos: "softly blurred forest background with dappled light filtering through leaves, deep green tones, gentle natural bokeh",
+                        neg: "indoor scene, studio backdrop, urban scene, harsh sun, blown highlights" },
+      "field":        { pos: "open grassy field softly blurred behind the subject at golden hour, warm low sunlight rim-lighting the subject, gentle natural bokeh",
+                        neg: "indoor scene, studio backdrop, urban scene, overcast, blue hour" },
+      "beach":        { pos: "softly blurred coastal scene behind the subject, distant ocean horizon with gentle wave texture, warm late-afternoon light",
+                        neg: "indoor scene, studio backdrop, urban scene, dark stormy weather" },
+      "cafe":         { pos: "warm coffeeshop interior softly blurred behind the subject, amber tungsten lighting, out-of-focus pendant lights as bokeh, depth of field separating subject from background",
+                        neg: "outdoor scenery, studio backdrop, busy background, harsh sun" },
+      "cityscape":    { pos: "panoramic city skyline softly blurred behind the subject at golden hour, warm low sunlight skimming the buildings, distant haze",
+                        neg: "indoor scene, studio backdrop, overcast, blue hour, harsh midday sun" },
+    };
+    const COMPOSITION = {
+      "":             { pos: "", neg: "" },
+      "headshot":     { pos: "classic headshot framing, head and shoulders centered in frame, eyes on upper-thirds line",
+                        neg: "full body, wide shot, distant subject" },
+      "midshot":      { pos: "mid-shot framing from the waist up, balanced composition, eyes in upper third",
+                        neg: "extreme close-up, full body, distant subject" },
+      "threequarter": { pos: "three-quarter framing from mid-thigh up, natural relaxed pose, subject's hips and upper legs clearly visible",
+                        neg: "extreme close-up, distant wide shot, headshot, close-up portrait" },
+      "fullbody":     { pos: "full-body framing showing the subject head to toe with feet visible in the frame, intentional environmental context around the subject",
+                        neg: "extreme close-up, headshot, cropped limbs, cropped feet, cropped legs, tight portrait, face filling the frame, waist-up framing" },
+    };
+    const CAMERA = {
+      "":               { pos: "", neg: "" },
+      "sony-a7r4":      { pos: "shot on Sony A7R IV", neg: "" },
+      "canon-r5":       { pos: "shot on Canon EOS R5", neg: "" },
+      "nikon-z9":       { pos: "shot on Nikon Z9", neg: "" },
+      "leica-sl2":      { pos: "shot on Leica SL2", neg: "" },
+      "hasselblad-x2d": { pos: "shot on Hasselblad X2D medium-format camera", neg: "" },
+    };
+    const LENS = {
+      "":      { pos: "", neg: "" },
+      "35mm":  { pos: "with a 35mm f/1.4 lens at f/2.0, moderate environmental context behind the subject", neg: "" },
+      "50mm":  { pos: "with a 50mm f/1.8 lens at f/2.0, natural undistorted perspective", neg: "" },
+      "85mm":  { pos: "with an 85mm f/1.4 lens at f/1.8, classic flattering headshot compression, shallow depth of field with smooth bokeh", neg: "" },
+      "105mm": { pos: "with a 105mm f/2 lens at f/2.2, tight flattering portrait compression, smooth creamy bokeh", neg: "" },
+      "135mm": { pos: "with a 135mm f/2 lens at f/2.5, beauty-headshot compression, very smooth bokeh", neg: "" },
+    };
+    const MOOD = {
+      "":           { pos: "", neg: "" },
+      "editorial":  { pos: "color graded with warm highlights and cool shadows, editorial cinematic palette, magazine cover quality",
+                      neg: "oversaturated, hdr look, cartoon colors" },
+      "daylight":   { pos: "natural daylight color balance, true-to-life skin tones, gentle contrast",
+                      neg: "heavy color grade, oversaturated, hdr look" },
+      "moody":      { pos: "moody desaturated film-inspired color grade, muted earth tones, subtle vignette",
+                      neg: "oversaturated, neon colors, hdr look" },
+      "highkey":    { pos: "high-key bright airy color treatment, lifted shadows, soft pastel highlights",
+                      neg: "low-key, dark shadows, heavy contrast" },
+      "vintage":    { pos: "vintage film color treatment, gentle grain, slight warm cast, period-correct palette",
+                      neg: "digital sharp clean look, oversharpened, modern hdr" },
+      "punchy":     { pos: "punchy magazine color grade with rich blacks, vibrant but controlled saturation, crisp highlights",
+                      neg: "washed out, muddy shadows, faded look" },
+    };
+    const QUALITY = {
+      "":             { pos: "", neg: "" },
+      "editorial8k":  { pos: "ultra sharp focus on the eyes, visible pore detail and natural skin texture, matte skin finish, natural matte complexion, dry skin with no facial shine, magazine cover quality",
+                        neg: "plastic skin, airbrushed, smooth skin, beauty filter, retouched, oily skin, shiny skin, greasy face, sweaty, glossy skin, specular highlights on skin, sebaceous shine, glistening forehead" },
+      "natmatte":     { pos: "natural matte skin with realistic texture and visible pores, neutral tones",
+                        neg: "plastic skin, airbrushed, oily skin, shiny skin, greasy face, beauty filter" },
+      "beauty":       { pos: "smooth beauty-grade skin retouching while preserving natural texture, subtle highlights on the cheekbones",
+                        neg: "plastic skin, airbrushed flat skin, no skin texture at all" },
+    };
+
+    const subjectSel = document.getElementById("pb-subject");
+    const ageSel     = document.getElementById("pb-age");
+    const lightSel   = document.getElementById("pb-light");
+    const clothesSel = document.getElementById("pb-clothes");
+    const facialSel  = document.getElementById("pb-facial");
+    const exprSel    = document.getElementById("pb-expression");
+    const envSel     = document.getElementById("pb-environment");
+    const compSel    = document.getElementById("pb-composition");
+    const camSel     = document.getElementById("pb-camera");
+    const lensSel    = document.getElementById("pb-lens");
+    const moodSel    = document.getElementById("pb-mood");
+    const qualSel    = document.getElementById("pb-quality");
+    const customAddEl   = document.getElementById("pb-custom-add");
+    const customAvoidEl = document.getElementById("pb-custom-avoid");
+    const resetBtn      = document.getElementById("pb-reset-advanced");
+    const posPreview = document.getElementById("pb-positive-preview");
+    const negPreview = document.getElementById("pb-negative-preview");
+    const copyPosBtn = document.getElementById("pb-copy-positive");
+    const copyNegBtn = document.getElementById("pb-copy-negative");
+    const statusEl   = document.getElementById("pb-copy-status");
+
+    if (!subjectSel || !ageSel || !lightSel || !clothesSel ||
+        !facialSel || !exprSel || !envSel || !compSel ||
+        !camSel || !lensSel || !moodSel || !qualSel ||
+        !customAddEl || !customAvoidEl || !resetBtn ||
+        !posPreview || !negPreview || !copyPosBtn || !copyNegBtn || !statusEl) return;
+
+    function advancedActive() {
+      return (facialSel.value || exprSel.value || envSel.value || compSel.value ||
+              camSel.value || lensSel.value || moodSel.value || qualSel.value ||
+              customAddEl.value.trim() || customAvoidEl.value.trim());
+    }
+
+    function gearClause() {
+      const cam = CAMERA[camSel.value] || CAMERA[""];
+      const lens = LENS[lensSel.value] || LENS[""];
+      if (cam.pos && lens.pos) return `${cam.pos} ${lens.pos}`;
+      return cam.pos || lens.pos || "";
+    }
+
+    function composePositive() {
+      const age = ageSel.value, subject = subjectSel.value;
+      const clothes = clothesSel.value, light = lightSel.value;
+      if (!advancedActive()) {
+        // Pure-default branch keeps the original template literal that
+        // tests pattern-match against IMG2IMG_DEFAULT_POSITIVE.
+        return buildPositive(age, subject, clothes, light);
+      }
+      const facial = (FACIAL[facialSel.value] || FACIAL[""]).pos;
+      const subjectPhrase = facial ? `${subject} ${facial}` : subject;
+      const head = `professional photograph of a ${age} ${subjectPhrase}`;
+      const parts = [head];
+      const push = (s) => { if (s) parts.push(s); };
+      push((EXPRESSION[exprSel.value] || EXPRESSION[""]).pos);
+      parts.push(`wearing ${clothes}`);
+      push((COMPOSITION[compSel.value] || COMPOSITION[""]).pos);
+      parts.push(light);
+      push((ENVIRONMENT[envSel.value] || ENVIRONMENT[""]).pos);
+      push(gearClause());
+      push((MOOD[moodSel.value] || MOOD[""]).pos);
+      parts.push("sharp focus, photorealistic, detailed skin texture, 8k");
+      push((QUALITY[qualSel.value] || QUALITY[""]).pos);
+      push(customAddEl.value.trim());
+      return parts.join(", ");
+    }
+
+    function composeNegative() {
+      const parts = [NEGATIVE_TEXT];
+      const push = (s) => { if (s) parts.push(s); };
+      push((FACIAL[facialSel.value] || FACIAL[""]).neg);
+      push((EXPRESSION[exprSel.value] || EXPRESSION[""]).neg);
+      push((ENVIRONMENT[envSel.value] || ENVIRONMENT[""]).neg);
+      push((COMPOSITION[compSel.value] || COMPOSITION[""]).neg);
+      push((MOOD[moodSel.value] || MOOD[""]).neg);
+      push((QUALITY[qualSel.value] || QUALITY[""]).neg);
+      push(customAvoidEl.value.trim());
+      return parts.join(", ");
+    }
+
+    function refresh() {
+      posPreview.textContent = composePositive();
+      negPreview.textContent = composeNegative();
+    }
+
+    function announce(text) {
+      // Re-set to "" first so identical consecutive announcements fire.
+      statusEl.textContent = "";
+      setTimeout(() => { statusEl.textContent = text; }, 50);
+    }
+
+    function flashState(btn, label, klass, srMessage) {
+      const original = btn.dataset.originalLabel || btn.textContent;
+      btn.dataset.originalLabel = original;
+      btn.textContent = label;
+      btn.classList.add(klass);
+      announce(srMessage);
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.classList.remove(klass);
+      }, 1600);
+    }
+
+    function selectPreview(previewEl) {
+      try {
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        const range = document.createRange();
+        range.selectNodeContents(previewEl);
+        sel.addRange(range);
+      } catch (e) { /* selection API blocked — last-resort silence */ }
+    }
+
+    function failCopy(btn, previewEl, kindLabel) {
+      selectPreview(previewEl);
+      flashState(btn, "Press Ctrl+C", "copy-failed",
+                 `Automatic copy unavailable. ${kindLabel} prompt is selected. Press Control+C to copy.`);
+    }
+
+    function copyText(btn, previewEl, kindLabel) {
+      const text = previewEl.textContent;
+      const onOk = () => flashState(btn, "Copied!", "copied",
+                                     `${kindLabel} prompt copied to clipboard.`);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text)
+          .then(onOk)
+          .catch(() => fallbackCopy(btn, previewEl, kindLabel));
+      } else {
+        fallbackCopy(btn, previewEl, kindLabel);
+      }
+    }
+
+    function fallbackCopy(btn, previewEl, kindLabel) {
+      const text = previewEl.textContent;
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "absolute"; ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      if (ok) {
+        flashState(btn, "Copied!", "copied",
+                   `${kindLabel} prompt copied to clipboard.`);
+      } else {
+        failCopy(btn, previewEl, kindLabel);
+      }
+    }
+
+    const watched = [
+      subjectSel, ageSel, lightSel, clothesSel,
+      facialSel, exprSel, envSel, compSel,
+      camSel, lensSel, moodSel, qualSel,
+    ];
+    watched.forEach(el => el.addEventListener("change", refresh));
+    [customAddEl, customAvoidEl].forEach(el => el.addEventListener("input", refresh));
+
+    resetBtn.addEventListener("click", () => {
+      [facialSel, exprSel, envSel, compSel, camSel, lensSel, moodSel, qualSel].forEach(
+        s => { s.value = ""; }
+      );
+      customAddEl.value = "";
+      customAvoidEl.value = "";
+      refresh();
+      announce("Advanced refinements reset.");
+    });
+
+    copyPosBtn.addEventListener("click", () => copyText(copyPosBtn, posPreview, "Positive"));
+    copyNegBtn.addEventListener("click", () => copyText(copyNegBtn, negPreview, "Negative"));
+
+    refresh();
+  })();
+</script>
+
+<!-- ===================================================================
+     Rail / Table-of-Contents navigation accessibility + behaviour fix
+     Added 2026 by docs-nav fix pass. Self-contained and removable.
+     Fixes across all LocalAI docs pages:
+       1. Clicking a rail item now scrolls the matching section fully
+          to just below the sticky header (previously the section
+          landed ~half a screen too low because scroll-padding-top on
+          <html> AND scroll-margin-top on the section both applied,
+          doubling the offset).
+       2. The clicked rail item immediately becomes the active item
+          (and aria-current="true") instead of lagging behind.
+       3. Full keyboard support: Tab/Shift+Tab between rail items,
+          Up/Down/Left/Right + Home/End to move focus, Enter or Space
+          to jump to a section.
+       4. Screen-reader semantics: the rail is exposed as a navigation
+          landmark, the active item carries aria-current, and focus is
+          moved to the target section so assistive tech announces it.
+       5. Works identically in light and dark themes (uses theme vars).
+     =================================================================== -->
+<style id="docnav-a11y-style">
+  /* JavaScript owns the scroll math below, so neutralise the native
+     anchor offset to avoid the doubled gap. */
+  html { scroll-padding-top: 0 !important; }
+  /* Clear, theme-aware focus ring on rail items for keyboard users. */
+  #rail a:focus-visible,
+  aside.rail a:focus-visible {
+    outline: 2px solid var(--accent, #4ea1ff);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  /* The navigation target receives programmatic focus so screen readers
+     announce it. We only ever add tabindex="-1" to those targets, so this
+     reliably suppresses the focus box without touching real controls. */
+  [tabindex="-1"]:focus,
+  [tabindex="-1"]:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+  /* Keep aria-current visually consistent with the existing .active rule. */
+  #rail a[aria-current="true"],
+  aside.rail a[aria-current="true"] { font-weight: 600; }
+</style>
+<script id="docnav-a11y-script">
+(() => {
+  if (window.__docNavA11y) return;
+  window.__docNavA11y = true;
+
+  const rail = document.querySelector('#rail') || document.querySelector('aside.rail');
+  if (!rail) return;
+  if (!rail.getAttribute('role')) rail.setAttribute('role', 'navigation');
+  if (!rail.getAttribute('aria-label')) rail.setAttribute('aria-label', 'On this page');
+
+  const links = Array.from(rail.querySelectorAll('a[href^="#"]')).filter(a => {
+    const id = decodeURIComponent((a.getAttribute('href') || '').slice(1));
+    return id && document.getElementById(id);
+  });
+  if (!links.length) return;
+
+  const root = document.documentElement;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Distance (px) the target heading should sit from the viewport top so it
+  // clears the sticky header/toolbar stack. Prefer the page's own maintained
+  // CSS variable; fall back to measuring pinned sticky/fixed bars.
+  function offset() {
+    const cs = getComputedStyle(root);
+    let v = parseInt(cs.getPropertyValue('--scroll-offset'), 10);
+    if (!v) v = parseInt(cs.getPropertyValue('--sticky-top'), 10);
+    if (!v) {
+      document.querySelectorAll('header, .toolbar, .filter-bar, .surface-tabs, nav').forEach(el => {
+        const p = getComputedStyle(el).position;
+        const r = el.getBoundingClientRect();
+        if ((p === 'sticky' || p === 'fixed') && r.top <= 1 && r.bottom > 0) {
+          v = Math.max(v || 0, Math.round(r.bottom));
+        }
+      });
+    }
+    return (v || 0) + 10;
+  }
+
+  function targetOf(link) {
+    return document.getElementById(decodeURIComponent(link.getAttribute('href').slice(1)));
+  }
+
+  function setActive(link) {
+    links.forEach(a => {
+      const on = a === link;
+      a.classList.toggle('active', on);
+      if (on) a.setAttribute('aria-current', 'true');
+      else a.removeAttribute('aria-current');
+    });
+  }
+
+  function scrollToEl(el) {
+    const y = el.getBoundingClientRect().top + window.scrollY - offset();
+    window.scrollTo({ top: Math.max(0, y), behavior: reduce ? 'auto' : 'smooth' });
+  }
+
+  // While a programmatic (click/keyboard) jump is animating, lock the
+  // scroll-spy so the active item doesn't flicker through intermediate
+  // sections on the way to the target.
+  const LOCK_MS = reduce ? 0 : 800;
+  let lockUntil = 0;
+
+  function activate(link, moveFocus) {
+    const el = targetOf(link);
+    if (!el) return;
+    const det = el.closest('details');
+    if (det && !det.open) det.open = true;
+    setActive(link);
+    lockUntil = Date.now() + LOCK_MS;
+    // Two rAFs let any <details>/filter reflow settle before we measure.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      scrollToEl(el);
+      try { history.replaceState(null, '', link.getAttribute('href')); } catch (e) {}
+      if (moveFocus !== false) {
+        if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1');
+        setTimeout(() => { try { el.focus({ preventScroll: true }); } catch (e) {} }, reduce ? 0 : 350);
+      }
+      // Re-assert the chosen item once the lock lifts and the page has
+      // come to rest, so this script is the final writer of .active even
+      // when the page's own scroll-spy fought us during the animation.
+      setTimeout(() => { setActive(link); }, LOCK_MS + 60);
+      setTimeout(spy, LOCK_MS + 260);
+    }));
+  }
+
+  links.forEach((link, i) => {
+    link.addEventListener('click', e => { e.preventDefault(); activate(link, true); });
+    link.addEventListener('keydown', e => {
+      switch (e.key) {
+        case 'Enter':
+        case ' ':
+        case 'Spacebar':
+          e.preventDefault(); activate(link, true); break;
+        case 'ArrowDown':
+        case 'ArrowRight':
+          e.preventDefault(); links[(i + 1) % links.length].focus(); break;
+        case 'ArrowUp':
+        case 'ArrowLeft':
+          e.preventDefault(); links[(i - 1 + links.length) % links.length].focus(); break;
+        case 'Home':
+          e.preventDefault(); links[0].focus(); break;
+        case 'End':
+          e.preventDefault(); links[links.length - 1].focus(); break;
+      }
+    });
+  });
+
+  // Authoritative scroll-spy. Registered AFTER the page's own (if any), so
+  // when both run on a scroll event this one sets the final active state —
+  // overriding stale highlighting and adding it on pages that never had any.
+  const targets = links.map(l => ({ link: l, el: targetOf(l) })).filter(t => t.el);
+  let spyScheduled = false;
+  function spy() {
+    spyScheduled = false;
+    if (Date.now() < lockUntil) return;
+    const line = offset() + 6;
+    let current = null;
+    targets.forEach(t => {
+      const r = t.el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return; // hidden/collapsed
+      if (r.top - line <= 0) current = t.link;
+    });
+    if (!current && targets.length) {
+      const firstVisible = targets.find(t => {
+        const r = t.el.getBoundingClientRect();
+        return !(r.width === 0 && r.height === 0);
+      });
+      if (firstVisible) current = firstVisible.link;
+    }
+    if (current) setActive(current);
+  }
+  window.addEventListener('scroll', () => {
+    if (spyScheduled) return;
+    spyScheduled = true;
+    requestAnimationFrame(spy);
+  }, { passive: true });
+
+  // Correct native hash landing on first load and back/forward navigation.
+  function fixHash() {
+    if (!location.hash) return;
+    const el = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (!el) return;
+    const det = el.closest('details');
+    if (det) det.open = true;
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToEl(el)));
+  }
+  window.addEventListener('hashchange', fixHash);
+  window.addEventListener('load', () => setTimeout(fixHash, 80));
+  setTimeout(spy, 200);
+})();
+</script>
+
+</body>
+</html>

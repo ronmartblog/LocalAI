@@ -1,0 +1,36 @@
+# LocalAI Studio — .gitattributes
+# Force consistent line endings across all clones.
+
+# Default: let git auto-detect text and normalize on commit.
+* text=auto eol=lf
+
+# Windows-only files keep CRLF so they remain runnable when checked out
+# on Windows hosts.
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# Unix shell scripts always LF, even on Windows.
+*.sh        text eol=lf
+
+# Treat these as binary so git never tries to munge them.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.zip       binary
+*.gz        binary
+*.tar       binary
+*.pdf       binary
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.otf       binary
+
+# Mark common documentation as linguist-documentation so GitHub's language
+# stats don't get skewed by long license/disclaimer text.
+LICENSE                 linguist-documentation
+NOTICE                  linguist-documentation
+*.md                    linguist-documentation
+docs/*.html             linguist-documentation

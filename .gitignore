@@ -1,0 +1,111 @@
+# LocalAI Studio — repository .gitignore
+# ----------------------------------------------------------------------------
+# This file blocks runtime, machine-local, and personal data from being
+# committed by accident. Even though the publish workflow in
+# tools/maintenance/update_repo.bat only copies files explicitly listed in
+# manifest.txt, this is a defense-in-depth backstop if anything is added
+# to the repo by other means (git add, IDE, manual copy, etc.).
+
+# ── Private SKU / configuration data ────────────────────────────────────────
+skus.json
+w365_skus.json
+config.json
+python_path.bat
+comfyui_path.bat
+
+# ── Runtime logs and per-run output ─────────────────────────────────────────
+*.log
+localai.log
+comfyui.log
+benchmark_results/
+toolbox_outputs/
+Scratchpad/
+*.cache/
+
+# ── Backups and archives (never shipped to GitHub) ──────────────────────────
+Archive/
+*.bak
+*.bak.*
+pre-edit-backup-*/
+pre-publish-backup-*/
+pre-refimg-*/
+
+# ── Release artifacts ───────────────────────────────────────────────────────
+LocalAI_v*.zip
+LocalAI-portable*.zip
+*_patch.zip
+
+# ── Internal AI-agent guidance and coordination state ───────────────────────
+# These files describe the project to local AI agents (Claude, GPT, etc.)
+# and contain private workflow notes. They are intentionally not part of
+# the public repository.
+AGENTS.md
+CLAUDE.md
+.claude/
+.coordination/
+coord.bat
+
+# ── Bundled third-party runtimes (installed separately by setup) ────────────
+ComfyUI/
+Ollama/
+
+# ── Python build / cache artifacts ──────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.whl
+
+# ── IDE / editor noise ──────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS junk ─────────────────────────────────────────────────────────────────
+Thumbs.db
+Desktop.ini
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Personal-data leak guards ───────────────────────────────────────────────
+# Any path containing personal identifiers should never be committed.
+# These patterns are intentionally aggressive — adjust only if a legitimate
+# file is being blocked.
+*ronmart*
+*CPC-ronma*
+*OneDrive*
+
+# ── Author-only docs that must never ship ───────────────────────────────────
+docs/model-summary.html
+docs/localai-docs-extension.js
+
+# ── Maintainer-only publish tooling ─────────────────────────────────────────
+# tools/maintenance/ holds the scripts that produce this repository from the
+# maintainer's working copy (update_repo.bat, scrub_grep.ps1, manifest.txt,
+# verify_manifest.ps1, push_to_github.bat). They are useful locally for the
+# publish workflow but are not intended for public consumption — external
+# users don't run them and shouldn't need to read them. Kept locally in
+# C:\repos\LocalAI\tools\maintenance\ so the maintainer can run them; this
+# .gitignore ensures they never end up on GitHub.
+tools/maintenance/
+
+# ---- Mac shell launchers (public repo is Windows-only) ------------------
+# All .sh launchers (setup.sh, run.sh, etc.) are intentionally kept out of
+# the public repo. The manifest does not list them and scrub_grep.ps1 has
+# them in the Forbidden list. This *.sh ignore is a third layer — if any
+# .sh file is accidentally added via git add ., it stays untracked.
+*.sh
+

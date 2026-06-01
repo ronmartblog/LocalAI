@@ -1,0 +1,1881 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- LocalAI Studio created by Ron Martinsen March 2026 - ron@martinsen.com - Apache 2.0 License -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LocalAI Studio — Installation & User Guide</title>
+  <script>
+  (() => {
+    const param = new URLSearchParams(window.location.search).get("clawpilotTheme");
+    const saved = localStorage.getItem("localai-docs-theme");
+    document.documentElement.setAttribute("data-theme", param || saved || "dark");
+  })();
+</script>
+  <script>
+  // Defensive ?html= redirect — the docs trio (index.html, Model-Guide.html,
+  // image-gen-guide.html) is opened via _open_prompt_doc_via_help() with
+  // direct URLs since post-v5.3.9 docs cleanup, but a couple of in-flight
+  // shortcuts still build URLs of the form index.html?html=<allowed.html>.
+  // Anything not in the allow-list (including the four legacy filenames
+  // removed in v5.3.9) falls through to the landing page.
+  (() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const target = params.get("html");
+      if (!target) return;
+      const ALLOWED = new Set([
+        "Model-Guide.html",
+        "index.html",
+        "image-gen-guide.html",
+      ]);
+      if (!ALLOWED.has(target)) return;
+      params.delete("html");
+      const qs = params.toString();
+      const url = target + (qs ? "?" + qs : "") + (window.location.hash || "");
+      window.location.replace(url);
+    } catch (e) { /* fall through to landing page */ }
+  })();
+</script>
+
+    <style>
+  /* === Cool-blue design system tokens (mirrors src/model_guide.py) === */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg:           #1a1a2e;
+    --surface:      #16213e;
+    --surface-soft: #1c2a4a;
+    --card:         #0f3460;
+    --card-alt:     #122a55;
+    --border:       #25406e;
+    --border-soft:  #1f3357;
+    --text:         #e7edf5;
+    --text-soft:    #c1cbdc;
+    --muted:        #93a3bd;
+    --accent:       #4f9cf9;
+    --accent-2:     #7ad7ff;
+    --accent-fg:    #0d1117;
+    --accent-soft:  rgba(79,156,249,0.14);
+    --good:         #4caf50;
+    --warn:         #ffb74d;
+    --bad:          #ff7b72;
+    --code-text:    #79c0ff;
+    --code-bg:      #0d1117;
+    --shadow:       0 18px 48px rgba(0,0,0,0.35);
+    --focus-ring:   0 0 0 3px rgba(122,215,255,0.55);
+    /* category palette */
+    --cat-ultrasmall-bg: #1a4a1a; --cat-ultrasmall-fg: #4caf50;
+    --cat-small-bg:      #1a3a4a; --cat-small-fg:      #4f9cf9;
+    --cat-medium-bg:     #3a2a1a; --cat-medium-fg:     #ff9800;
+    --cat-large-bg:      #3a1a1a; --cat-large-fg:      #f44336;
+    --cat-extralarge-bg: #2a1a3a; --cat-extralarge-fg: #ce93d8;
+    --cat-image-bg:      #1a3a3a; --cat-image-fg:      #4dd0e1;
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg:           #f4f7fb;
+    --surface:      #ffffff;
+    --surface-soft: #eef3fb;
+    --card:         #ffffff;
+    --card-alt:     #f1f6ff;
+    --border:       #cbd6e6;
+    --border-soft:  #dbe4f1;
+    --text:         #142036;
+    --text-soft:    #2c3a55;
+    --muted:        #54658a;
+    --accent:       #1864c4;
+    --accent-2:     #1b8fc7;
+    --accent-fg:    #ffffff;
+    --accent-soft:  rgba(24,100,196,0.10);
+    --good:         #2e7d32;
+    --warn:         #b25e00;
+    --bad:          #c0392b;
+    --code-text:    #0b5fa1;
+    --code-bg:      #eef3fb;
+    --shadow:       0 18px 48px rgba(20,32,54,0.10);
+    --focus-ring:   0 0 0 3px rgba(24,100,196,0.40);
+    --cat-ultrasmall-bg: #e1f2e1; --cat-ultrasmall-fg: #2e7d32;
+    --cat-small-bg:      #dfeefa; --cat-small-fg:      #1864c4;
+    --cat-medium-bg:     #fbe9d6; --cat-medium-fg:     #b25e00;
+    --cat-large-bg:      #fbdcdc; --cat-large-fg:      #c0392b;
+    --cat-extralarge-bg: #ecdcf1; --cat-extralarge-fg: #6a1b7a;
+    --cat-image-bg:      #ddf1f4; --cat-image-fg:      #006c75;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* docnav-a11y fix (2026-05-30): JavaScript owns scroll math (see end of body).
+     Section landing position is governed by `scroll-margin-top` on each <section>
+     PLUS this `scroll-padding-top`; setting both to the offset doubled the gap,
+     pushing the section ~half a screen below the sticky header. Keep this at 0;
+     the per-section `scroll-margin-top` still handles native-anchor landings. */
+  html { scroll-behavior: smooth; scroll-padding-top: 0; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+    line-height: 1.7;
+  }
+  :focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
+
+  /* === Skip link === */
+  .skip-link {
+    position: absolute; left: 12px; top: -40px;
+    background: var(--accent); color: var(--accent-fg);
+    padding: 8px 14px; border-radius: 8px; font-weight: 600;
+    z-index: 10000; text-decoration: none;
+  }
+  .skip-link:focus { top: 12px; }
+
+  /* === Page header (sticky) === */
+  header.page-header {
+    background: linear-gradient(135deg, var(--card) 0%, var(--surface) 100%);
+    border-bottom: 2px solid var(--accent);
+    padding: 22px 32px 14px;
+    position: sticky; top: 0; z-index: 60;
+  }
+  header.page-header .wrap { max-width: 1280px; margin: 0 auto; }
+  .header-row {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .header-row h1 {
+    font-size: 1.7rem; letter-spacing: -.02em; color: var(--text);
+    margin: 0;
+  }
+  .header-row .badge {
+    display: inline-block; background: var(--accent); color: var(--accent-fg);
+    border-radius: 999px; padding: 3px 11px; font-size: .78rem;
+    font-weight: 700; vertical-align: middle; margin-left: 6px;
+  }
+  .header-row .spacer { flex: 1; }
+  .header-row .header-sub {
+    color: var(--text-soft); font-size: .95rem; margin-top: 4px;
+    flex-basis: 100%;
+  }
+  .theme-toggle {
+    background: var(--card-alt); color: var(--text);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 7px 14px; font-size: .85rem; font-weight: 600; cursor: pointer;
+  }
+  .theme-toggle:hover { background: var(--accent-soft); border-color: var(--accent); }
+
+  /* === Doc tabs (links to sibling docs styled as tabs) === */
+  .doc-tabs {
+    display: flex; gap: 4px; margin-top: 10px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+  }
+  .doc-tabs a {
+    background: transparent; color: var(--text-soft);
+    text-decoration: none; padding: 8px 16px;
+    border: 1px solid transparent; border-bottom: 0;
+    border-radius: 8px 8px 0 0; font-size: .9rem; font-weight: 600;
+    margin-bottom: -1px;
+  }
+  .doc-tabs a:hover { background: var(--accent-soft); color: var(--accent); }
+  .doc-tabs a[aria-current="page"] {
+    background: var(--bg); color: var(--accent);
+    border-color: var(--border); border-bottom-color: var(--bg);
+  }
+
+  /* === Toolbar (search + density), sticky beneath header === */
+  .toolbar {
+    position: sticky; top: var(--header-h, 150px); z-index: 50;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 10px 32px;
+  }
+  .toolbar .wrap {
+    max-width: 1280px; margin: 0 auto;
+    display: grid; grid-template-columns: 1fr auto auto; gap: 10px;
+    align-items: center;
+  }
+  .search {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--card-alt); border: 1px solid var(--border);
+    border-radius: 10px; padding: 6px 12px;
+  }
+  .search input {
+    flex: 1; background: transparent; border: 0; outline: none;
+    color: var(--text); font-size: .95rem; min-width: 0;
+    font-family: inherit;
+  }
+  .search input::placeholder { color: var(--muted); }
+  .density { display: flex; gap: 4px; }
+  .density button {
+    background: var(--card-alt); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 12px; font-size: .82rem; cursor: pointer;
+    font-family: inherit;
+  }
+  .density button[aria-pressed="true"] {
+    background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
+  }
+  .toolbar-info { color: var(--muted); font-size: .85rem; text-align: right; }
+
+  /* === Shell layout: left rail + content === */
+  .shell {
+    display: grid; grid-template-columns: 250px 1fr;
+    max-width: 1280px; margin: 0 auto; padding: 24px 32px 50px; gap: 32px;
+  }
+  @media (max-width: 980px) {
+    .shell { grid-template-columns: 1fr; padding: 18px 18px 40px; gap: 14px; }
+    .rail { position: static; max-height: none; border-right: 0;
+            border-bottom: 1px solid var(--border); padding: 0 0 14px; margin: 0; }
+  }
+  .rail {
+    position: sticky; top: calc(var(--header-h, 150px) + 64px);
+    align-self: start;
+    max-height: calc(100vh - var(--header-h, 150px) - 88px);
+    overflow: auto; border-right: 1px solid var(--border); padding-right: 14px;
+  }
+  .rail h3 {
+    margin: 0 0 6px; color: var(--accent-2);
+    font-size: .76rem; text-transform: uppercase; letter-spacing: .08em;
+  }
+  .rail ul { list-style: none; margin: 0 0 16px; padding: 0; }
+  .rail li { margin: 0; }
+  .rail a {
+    display: block; color: var(--text-soft); text-decoration: none;
+    font-size: .92rem; padding: 6px 10px; border-radius: 6px;
+    border-left: 2px solid transparent;
+  }
+  .rail a:hover { background: var(--accent-soft); color: var(--accent-2); }
+  .rail a.active {
+    background: var(--accent-soft); color: var(--accent);
+    border-left-color: var(--accent); font-weight: 600;
+  }
+
+  /* === Main content area === */
+  main.content { min-width: 0; }
+  main.content section { margin-bottom: 48px; scroll-margin-top: var(--scroll-offset, 230px); }
+  main.content h2 {
+    margin: 0 0 16px; font-size: 1.5rem; color: var(--accent-2);
+    padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  main.content h3 {
+    margin: 22px 0 8px; font-size: 1.1rem; color: var(--text);
+  }
+  main.content h4 {
+    margin: 16px 0 6px; font-size: 1rem; color: var(--accent);
+  }
+  main.content p { margin: 10px 0; color: var(--text-soft); }
+  main.content a { color: var(--accent-2); text-decoration: none; }
+  main.content a:hover { text-decoration: underline; }
+  main.content ul, main.content ol { margin: 10px 0 14px 22px; padding: 0; }
+  main.content li { margin: 6px 0; color: var(--text-soft); line-height: 1.6; }
+  main.content li strong { color: var(--text); }
+
+  /* === Code === */
+  code {
+    font-family: Consolas, "Courier New", Courier, monospace;
+    background: var(--code-bg); border: 1px solid var(--border);
+    color: var(--code-text); border-radius: 6px;
+    padding: 2px 6px; font-size: .9em;
+  }
+  pre {
+    font-family: Consolas, "Courier New", Courier, monospace;
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 20px; overflow-x: auto;
+    margin: 12px 0; color: var(--text); font-size: .9rem; line-height: 1.6;
+  }
+  pre code { background: transparent; border: 0; padding: 0; color: inherit; }
+  pre .comment { color: var(--muted); }
+  pre .cmd     { color: var(--accent); }
+  pre .string  { color: var(--accent-2); }
+  pre .ok      { color: var(--good); }
+
+  /* === Tables === */
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0; font-size: .92rem;
+    background: var(--card-alt); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+  }
+  th {
+    background: var(--card); color: var(--accent-2);
+    padding: 10px 14px; text-align: left; font-size: .82rem;
+    text-transform: uppercase; letter-spacing: .04em;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 10px 14px; border-bottom: 1px solid var(--border-soft);
+    color: var(--text-soft); vertical-align: top;
+  }
+  tr:last-child td { border-bottom: 0; }
+  tr:hover td { background: var(--accent-soft); }
+
+  /* === Cards === */
+  .card-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px; margin: 16px 0;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.12);
+    transition: border-color 120ms, transform 120ms;
+  }
+  .card:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .card h3, .card h4 {
+    color: var(--accent-2); margin: 0 0 8px; font-size: 1rem;
+  }
+  .card p { margin: 0; color: var(--text-soft); font-size: .92rem; }
+
+  /* === Steps (index.html) === */
+  .steps { counter-reset: step; }
+  .step {
+    display: flex; gap: 16px; margin-bottom: 18px;
+    background: var(--surface-soft); border: 1px solid var(--border-soft);
+    border-radius: 10px; padding: 18px; border-left: 4px solid var(--accent);
+  }
+  .step-num {
+    counter-increment: step; flex-shrink: 0;
+    width: 36px; height: 36px; background: var(--accent);
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 1.05rem; color: var(--accent-fg);
+  }
+  .step-body { min-width: 0; }
+  .step-body h4 { color: var(--text); margin: 0 0 4px; font-size: 1rem; }
+  .step-body p  { color: var(--text-soft); margin: 0; font-size: .95rem; }
+
+  /* === Step-list (image-gen-guide.html numbered list variant) === */
+  .step-list {
+    list-style: none; padding-left: 0; counter-reset: sl; margin: 12px 0;
+  }
+  .step-list li {
+    counter-increment: sl;
+    padding: 10px 14px 10px 52px;
+    position: relative; background: var(--surface-soft);
+    border: 1px solid var(--border-soft); border-radius: 8px;
+    margin-bottom: 8px; color: var(--text-soft);
+  }
+  .step-list li::before {
+    content: counter(sl);
+    position: absolute; left: 12px; top: 50%;
+    transform: translateY(-50%); width: 26px; height: 26px;
+    background: var(--card); border: 2px solid var(--good);
+    border-radius: 50%; color: var(--good); font-weight: 700;
+    font-size: .85rem; display: flex; align-items: center; justify-content: center;
+  }
+
+  /* === Callout / Alert family === */
+  .callout {
+    background: var(--accent-soft); border: 1px solid var(--border);
+    border-left: 4px solid var(--accent); border-radius: 10px;
+    padding: 14px 16px; margin: 14px 0; color: var(--text);
+  }
+  .callout strong { color: var(--text); }
+  .alert {
+    background: var(--surface-soft); border: 1px solid var(--border-soft);
+    border-left: 4px solid var(--accent); border-radius: 10px;
+    padding: 14px 18px; margin: 14px 0; font-size: .95rem; color: var(--text);
+  }
+  .alert p { margin-bottom: 6px; color: var(--text-soft); }
+  .alert p:last-child { margin-bottom: 0; }
+  .alert strong { color: var(--text); }
+  .alert-info, .alert-blue { border-left-color: var(--accent); }
+  .alert-success, .alert-green { border-left-color: var(--good); }
+  .alert-warning, .alert-orange { border-left-color: var(--warn); }
+  .alert-red { border-left-color: var(--bad); }
+  .alert-title {
+    font-size: .76rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .07em;
+    margin-bottom: 8px; color: var(--accent);
+  }
+  .alert.alert-green  .alert-title,
+  .alert.alert-success .alert-title { color: var(--good); }
+  .alert.alert-orange .alert-title,
+  .alert.alert-warning .alert-title { color: var(--warn); }
+  .alert.alert-red    .alert-title { color: var(--bad); }
+
+  /* === Analyze-prompt special callout === */
+  .analyze-callout {
+    background: rgba(76,175,80,0.06); border: 1px solid var(--good);
+    border-left: 4px solid var(--good); border-radius: 10px;
+    padding: 18px 22px; margin: 18px 0; color: var(--text);
+  }
+  .analyze-callout .callout-header {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+  }
+  .analyze-callout .callout-icon { font-size: 1.5rem; line-height: 1; }
+  .analyze-callout .callout-title {
+    font-size: 1.05rem; font-weight: 700; color: var(--good); margin: 0;
+  }
+  .analyze-callout .callout-subtitle {
+    font-size: .85rem; color: var(--muted); margin-top: 2px;
+  }
+  .analyze-callout p { margin: 6px 0; color: var(--text-soft); }
+  .analyze-callout ol { padding-left: 22px; margin: 8px 0; }
+  .analyze-callout li { color: var(--text-soft); margin: 4px 0; }
+
+  /* === Settings box (image-gen-guide) === */
+  .settings-box {
+    background: var(--card-alt); border: 1px solid var(--border);
+    border-left: 4px solid var(--accent); border-radius: 10px;
+    padding: 14px 20px; margin: 14px 0;
+    display: flex; flex-wrap: wrap; gap: 24px;
+  }
+  .settings-box .setting { font-size: .9rem; color: var(--text-soft); }
+  .settings-box .setting span { color: var(--muted); }
+  .settings-box .setting strong { color: var(--text); }
+
+  /* === Feature list (index.html) === */
+  .feature-list {
+    list-style: none; display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px; margin: 12px 0; padding: 0;
+  }
+  .feature-list li {
+    background: var(--surface-soft); border-radius: 8px;
+    padding: 10px 14px; border-left: 3px solid var(--accent);
+    border-top: 1px solid var(--border-soft);
+    border-right: 1px solid var(--border-soft);
+    border-bottom: 1px solid var(--border-soft);
+    font-size: .92rem; color: var(--text);
+  }
+  .feature-list li::before {
+    content: "\2713  "; color: var(--good); font-weight: 700;
+  }
+
+  /* === Category tag chips (index.html) === */
+  .model-cat { margin-bottom: 10px; }
+  .cat-tag {
+    display: inline-block; padding: 2px 9px; border-radius: 6px;
+    font-size: .78rem; font-weight: 700; margin-right: 6px;
+    border: 1px solid var(--border-soft);
+  }
+  .cat-ultrasmall { background: var(--cat-ultrasmall-bg); color: var(--cat-ultrasmall-fg); }
+  .cat-small      { background: var(--cat-small-bg);      color: var(--cat-small-fg); }
+  .cat-medium     { background: var(--cat-medium-bg);     color: var(--cat-medium-fg); }
+  .cat-large      { background: var(--cat-large-bg);      color: var(--cat-large-fg); }
+  .cat-extralarge { background: var(--cat-extralarge-bg); color: var(--cat-extralarge-fg); }
+  .cat-image      { background: var(--cat-image-bg);      color: var(--cat-image-fg); }
+
+  /* === Back link / footer === */
+  .back-link {
+    display: inline-block; color: var(--accent-2); text-decoration: none;
+    font-size: .9rem; margin-bottom: 18px; border: 1px solid var(--border);
+    padding: 6px 12px; border-radius: 999px; background: var(--card-alt);
+  }
+  .back-link:hover { background: var(--accent-soft); border-color: var(--accent); }
+  footer.page-footer {
+    text-align: center; padding: 24px;
+    color: var(--muted); font-size: .85rem;
+    border-top: 1px solid var(--border); margin-top: 36px;
+  }
+  footer.page-footer a { color: var(--accent-2); text-decoration: none; }
+  footer.page-footer a:hover { text-decoration: underline; }
+
+  /* === Empty state (search) === */
+  .empty {
+    padding: 32px; text-align: center; color: var(--muted);
+    background: var(--card-alt); border: 1px solid var(--border);
+    border-radius: 12px; display: none; margin: 12px 0;
+  }
+  .empty.visible { display: block; }
+
+  /* === Density (Compact mode) === */
+  body.compact main.content section { margin-bottom: 30px; }
+  body.compact main.content h2 { font-size: 1.3rem; margin-bottom: 10px; padding-bottom: 6px; }
+  body.compact main.content h3 { font-size: 1.0rem; margin: 14px 0 6px; }
+  body.compact main.content h4 { font-size: .95rem; margin: 12px 0 4px; }
+  body.compact main.content p,
+  body.compact main.content li { font-size: .9rem; line-height: 1.55; }
+  body.compact main.content p { margin: 6px 0; }
+  body.compact .step, body.compact .card, body.compact .alert,
+  body.compact .callout, body.compact .analyze-callout,
+  body.compact .settings-box, body.compact .feature-list li {
+    padding: 10px 14px;
+  }
+  body.compact .step-list li { padding: 6px 12px 6px 46px; }
+  body.compact .card-grid, body.compact .feature-list { gap: 8px; }
+  body.compact th, body.compact td { padding: 6px 10px; }
+  body.compact pre { padding: 10px 14px; }
+
+  @media (max-width: 760px) {
+    header.page-header { padding: 16px 18px 10px; }
+    .toolbar { padding: 8px 18px; }
+    .toolbar .wrap { grid-template-columns: 1fr; }
+    .toolbar-info { text-align: left; }
+    .shell { padding: 14px 18px 36px; }
+    .header-row h1 { font-size: 1.35rem; }
+  }
+</style>
+</head>
+<body>
+
+<a href="#main" class="skip-link">Skip to content</a>
+
+<header class="page-header" id="page-header">
+  <div class="wrap">
+    <div class="header-row">
+      <h1>LocalAI Studio <span class="badge">v2026.06.01.6</span></h1>
+      <span class="spacer"></span>
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Switch to light theme">☀ Light</button>
+      <p class="header-sub">Run AI language models and generate images 100% locally — GPU, NPU, or CPU. No cloud, no subscription.</p>
+    </div>
+  <div class="doc-tabs" role="tablist" aria-label="Documentation set">
+    <a href="index.html" role="tab" aria-current="page">Docs Home</a>
+    <a href="Model-Guide.html" role="tab">Model Guide</a>
+    <a href="image-gen-guide.html" role="tab">Image Gen Guide</a>
+  </div>
+  </div>
+</header>
+
+<div class="toolbar" id="toolbar">
+  <div class="wrap">
+    <label class="search">
+      <span aria-hidden="true">🔍</span>
+      <input id="search" type="search" placeholder="Search this page…" aria-label="Search this page">
+    </label>
+    <div class="density" role="group" aria-label="Density">
+      <button type="button" aria-pressed="true" data-density="comfortable">Comfy</button>
+      <button type="button" aria-pressed="false" data-density="compact">Compact</button>
+    </div>
+    <span class="toolbar-info" id="toolbar-info">Showing all sections</span>
+  </div>
+</div>
+
+<div class="shell">
+<aside class="rail" id="rail" aria-label="Sections on this page">
+  <h3>Get Started</h3>
+  <ul>
+    <li><a href="#overview"     data-toc-link>Overview</a></li>
+    <li><a href="#requirements" data-toc-link>System Requirements</a></li>
+    <li><a href="#install"      data-toc-link>Installation</a></li>
+    <li><a href="#launch"       data-toc-link>Launching the App</a></li>
+  </ul>
+  <h3>Using the App</h3>
+  <ul>
+    <li><a href="#models"    data-toc-link>Models</a></li>
+    <li><a href="#ui"        data-toc-link>Using the App</a></li>
+    <li><a href="#image-gen" data-toc-link>Image Generation</a></li>
+    <li><a href="#toolbox"   data-toc-link>Toolbox</a></li>
+  </ul>
+  <h3>Hardware</h3>
+  <ul>
+    <li><a href="#npu"       data-toc-link>NPU Setup</a></li>
+    <li><a href="#benchmark" data-toc-link>Batch Benchmark</a></li>
+    <li><a href="#portable"  data-toc-link>Portability</a></li>
+  </ul>
+  <h3>Reference</h3>
+  <ul>
+    <li><a href="#troubleshoot" data-toc-link>Troubleshooting</a></li>
+    <li><a href="#uninstall"    data-toc-link>Uninstall</a></li>
+  </ul>
+</aside>
+<main class="content" id="main">
+
+<!-- ── Overview ─────────────────────────────────────────────────────────── -->
+<section id="overview">
+  <h2>Overview</h2>
+  <p>
+    LocalAI Studio is a self-contained desktop application for Windows that lets you download,
+    manage, and chat with open-source AI language models — and generate images locally using
+    ComfyUI — completely offline after the initial download.
+    No API keys, no subscriptions, no data leaving your machine.
+  </p>
+
+  <ul class="feature-list">
+    <li>Browse &amp; download 48 curated built-in models (LLMs, vision, utility demos + image generation)</li>
+    <li>Live download progress &amp; disk-space check</li>
+    <li>GPU acceleration (NVIDIA, AMD, Intel Arc)</li>
+    <li>Intel / Qualcomm / AMD NPU support via DirectML</li>
+    <li>CPU-only fallback mode</li>
+    <li>Real-time RAM, VRAM &amp; CPU monitoring</li>
+    <li>Built-in streaming chat interface</li>
+    <li>Model delete on close (save disk space)</li>
+    <li>Batch benchmark mode (GUI &amp; CLI)</li>
+    <li>Portable — copy folder to another PC</li>
+    <li>Full application log with filter levels</li>
+  </ul>
+</section>
+
+<!-- ── Requirements ─────────────────────────────────────────────────────── -->
+<section id="requirements">
+  <h2>System Requirements</h2>
+
+  <h3>Minimum (AI PC / low-end)</h3>
+  <table>
+    <tr><th>Component</th><th>Minimum</th><th>Notes</th></tr>
+    <tr><td>OS</td><td>Windows 11 22H2+</td><td>Windows 24H2 recommended for NPU support</td></tr>
+    <tr><td>RAM</td><td>8 GB</td><td>4 GB free needed for smallest models</td></tr>
+    <tr><td>Storage</td><td>2 GB free</td><td>Each model is 0.4–12 GB</td></tr>
+    <tr><td>CPU</td><td>Any 64-bit</td><td>Intel / AMD / Qualcomm Snapdragon X</td></tr>
+    <tr><td>Python</td><td>3.11+</td><td>Auto-installed by setup.bat</td></tr>
+    <tr><td>Ollama</td><td>Any</td><td>Auto-installed by setup.bat</td></tr>
+  </table>
+
+  <h3>Recommended (GPU system)</h3>
+  <table>
+    <tr><th>Component</th><th>Recommended</th></tr>
+    <tr><td>GPU VRAM</td><td>6–12 GB (NVIDIA RTX, AMD RX 6000+, Intel Arc)</td></tr>
+    <tr><td>RAM</td><td>16–32 GB</td></tr>
+    <tr><td>Storage</td><td>SSD with 20+ GB free</td></tr>
+  </table>
+
+  <h3>Software Prerequisites</h3>
+  <div class="card-grid">
+    <div class="card">
+      <h4>Python 3.11+ (required)</h4>
+      <p>The app is written in Python. <strong>setup.bat</strong> installs it automatically via
+         winget. If you prefer to install manually:<br><br>
+         <strong>Download:</strong> <a href="https://www.python.org/downloads/" style="color:var(--accent)">
+         python.org/downloads</a><br>
+         During install, tick <em>"Add Python to PATH"</em>.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Ollama (required for GPU/CPU models)</h4>
+      <p>Ollama is the engine that runs models on your GPU or CPU.
+         <strong>setup.bat</strong> installs it automatically.<br><br>
+         <strong>Manual download:</strong> <a href="https://ollama.com/download" style="color:var(--accent)">
+         ollama.com/download</a>
+      </p>
+    </div>
+    <div class="card">
+      <h4>ONNX Runtime DirectML (optional — NPU)</h4>
+      <p>Needed only for the <em>NPU/DirectML</em> backend (Phi-3 ONNX models on your NPU).
+         <strong>setup.bat</strong> (Windows) asks whether to install it, or run:<br>
+         <code>pip install onnxruntime-directml optimum[onnxruntime] transformers huggingface-hub</code>
+      </p>
+    </div>
+    <div class="card">
+      <h4>NVIDIA CUDA (optional)</h4>
+      <p>Ollama auto-detects NVIDIA GPUs if the NVIDIA driver is installed.
+         No separate CUDA toolkit install required — Ollama bundles its own CUDA libraries.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Installation ──────────────────────────────────────────────────────── -->
+<section id="install">
+  <h2>Installation</h2>
+  <p>Everything is handled by a single script. Here is what happens step by step:</p>
+
+  <h3>Windows Installation</h3>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h4>Copy / extract the LocalAI folder</h4>
+        <p>Place the <code>LocalAI</code> folder anywhere on your system (e.g., <code>C:\LocalAI</code>
+           or your Documents folder). The app stores everything relative to this folder.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h4>Run <code>setup.bat</code></h4>
+        <p>Double-click <strong>setup.bat</strong>. It will:<br>
+          &bull; Install Python 3.13 (if not present) via <code>winget</code><br>
+          &bull; Install Python packages: <code>customtkinter</code>, <code>requests</code>, <code>psutil</code><br>
+          &bull; Optionally install ONNX Runtime DirectML for NPU support<br>
+          &bull; Install Ollama (if not present) via <code>winget</code></p>
+        <pre><span class="comment"># Requires internet connection for first-time setup only</span>
+<span class="ok">double-click</span> setup.bat</pre>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h4>Launch</h4>
+        <p>Double-click <strong>run.bat</strong>. Ollama starts in the background automatically,
+           then the LocalAI Studio window opens.</p>
+        <pre><span class="ok">double-click</span> run.bat
+<span class="comment"># or from a terminal:</span>
+<span class="cmd">cd</span> C:\LocalAI
+python main.py</pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-info">
+    <strong>Note:</strong> An internet connection is required only for the initial setup and
+    for downloading models. Once a model is downloaded it runs 100% offline.
+  </div>
+
+  <h3>Manual Installation (advanced)</h3>
+  <p>If you prefer to install dependencies yourself:</p>
+  <pre><span class="comment"># 1. Install Python 3.13 from python.org (tick "Add to PATH")</span>
+<span class="comment"># 2. Install Ollama from ollama.com/download/windows</span>
+<span class="comment"># 3. Install Python packages</span>
+<span class="cmd">pip install</span> customtkinter requests psutil
+
+<span class="comment"># 4. (Optional) NPU/DirectML support</span>
+<span class="cmd">pip install</span> onnxruntime-directml "optimum[onnxruntime]" transformers huggingface-hub
+
+<span class="comment"># 5. Run the app</span>
+<span class="cmd">python</span> main.py</pre>
+</section>
+
+<!-- ── Launch ──────────────────────────────────────────────────────────── -->
+<section id="launch">
+  <h2>Launching the App</h2>
+
+  <table>
+    <tr><th>Method</th><th>How</th><th>Notes</th></tr>
+    <tr>
+      <td>Double-click (Windows)</td>
+      <td><code>run.bat</code></td>
+      <td>Recommended on Windows. Starts Ollama automatically.</td>
+    </tr>
+    </tr>
+    <tr>
+      <td>Terminal (any)</td>
+      <td><code>python main.py</code></td>
+      <td>Run from inside the <code>LocalAI</code> folder.</td>
+    </tr>
+    <tr>
+      <td>Active venv</td>
+      <td><code>.venv\Scripts\python.exe main.py</code></td>
+      <td>Use the venv interpreter directly when you have a terminal with the virtual
+          environment active. Skips the Ollama auto-start that <code>run.bat</code>
+          provides.</td>
+    </tr>
+    <tr>
+      <td>Desktop shortcut (Windows)</td>
+      <td>Right-click <code>run.bat</code> → <em>Send to &rarr; Desktop</em></td>
+      <td>Makes a shortcut on your desktop.</td>
+    </tr>
+  </table>
+
+  <p>On first launch the app will attempt to connect to Ollama on
+     <code>http://localhost:11434</code>. The sidebar shows the connection status.</p>
+</section>
+
+<!-- ── Models ────────────────────────────────────────────────────────────── -->
+<section id="models">
+  <h2>Included Model Catalog</h2>
+  <p><strong>48 built-in models</strong> across chat, vision, image generation, speech, embeddings, and document AI surfaces,
+  plus any models you add yourself via the <strong>+ Add from Hugging Face</strong> button on the Models tab.
+  All LLMs are quantised (Q4 or similar) to fit on modest hardware, and everything is downloaded
+  on-demand — nothing is pre-installed. Every model has a dedicated <strong>Model Guide</strong>
+  with recommended settings, click-to-copy demo prompts, sample renders, and per-card hardware fit.</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <h3>Text generation</h3>
+      <p><strong>19 chat / reasoning models</strong> across four tiers — Ultra Small (3) for 4 GB RAM and below,
+      Small (8) for AI PCs, Medium (5) for 8+ GB GPUs, and Extra Large (3)
+      for high-memory GPU sessions.</p>
+    </div>
+    <div class="card">
+      <h3>Vision &amp; multimodal</h3>
+      <p><strong>11 vision models</strong> including Llama 3.2 Vision, Florence-2 Base, Gemma 3 (4B / 12B / 27B),
+      Qwen2.5-VL (3B / 7B / 32B), Mistral Small 3.2, MiniCPM-V, and Phi-4 Multimodal. Used by the
+      <strong>Analyze → Prompt</strong> flow on the Image Gen page.</p>
+    </div>
+    <div class="card">
+      <h3>Image generation</h3>
+      <p><strong>11 image models</strong> from SD 1.5 / Realistic Vision (4 GB-friendly) all the way up to
+      Flux.1 Dev FP16, plus SDXL Base, Juggernaut XL, Playground v2.5, Flux Schnell / Dev Q4, Z-Image / Turbo,
+      SDXL Lightning, and a low-VRAM SDXL build.</p>
+    </div>
+    <div class="card">
+      <h3>Speech &amp; utility</h3>
+      <p><strong>3 speech models</strong> (Whisper Large v3 Turbo CPU / GPU, SpeechT5 TTS),
+      <strong>1 embedding model</strong> (All-MiniLM), and
+      <strong>3 document AI utilities</strong> (Table Transformer, TrOCR Base / Large Printed).</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>See the full Model Guide.</strong>
+    Every catalog model has its own card in <a href="Model-Guide.html"><strong>the Model Guide</strong></a>
+    with recommended settings, demo prompts, sample renders, and one-click hardware filters
+    (hardware SKU chips, VRAM budget, intent / goal). The guide is the source of truth — this
+    landing page just summarises what's in the box.
+  </div>
+
+  <div class="alert alert-warning">
+    <strong>Storage tip:</strong> Language models are downloaded to Ollama's model cache
+    (<code>%USERPROFILE%\.ollama\models</code> on Windows). Image generation models are stored in
+    <code>ComfyUI\models\checkpoints\</code> or <code>ComfyUI\models\diffusion_models\</code>
+    (GGUF Flux models). Make sure your drive has enough free space before downloading — the app
+    checks automatically and will warn you.
+  </div>
+</section>
+
+<!-- ── NPU ───────────────────────────────────────────────────────────────── -->
+<section id="npu">
+  <h2>NPU / DirectML Setup</h2>
+  <p>
+    If your system has an NPU (Intel Core Ultra "Meteor Lake" / "Lunar Lake", Qualcomm Snapdragon X,
+    or AMD Ryzen AI), LocalAI Studio can use it via <strong>ONNX Runtime DirectML</strong>.
+    This gives faster, more power-efficient inference than CPU.
+  </p>
+
+  <h3>Supported NPUs</h3>
+  <table>
+    <tr><th>Vendor</th><th>Chipset / Product</th><th>Notes</th></tr>
+    <tr><td>Intel</td><td>Core Ultra 100 (Meteor Lake), Core Ultra 200 (Lunar Lake / Arrow Lake)</td>
+        <td>Intel AI Boost NPU. Confirmed working.</td></tr>
+    <tr><td>Qualcomm</td><td>Snapdragon X Elite / X Plus</td>
+        <td>AI PC. DirectML support via Windows AI.</td></tr>
+    <tr><td>AMD</td><td>Ryzen AI (Phoenix, Strix Point)</td>
+        <td>AMD XDNA NPU. DirectML support.</td></tr>
+    <tr><td>Any GPU</td><td>Any DirectX 12 GPU</td>
+        <td>DirectML works on all DX12 GPUs, not just NPUs.</td></tr>
+  </table>
+
+  <h3>Installing NPU Support</h3>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h4>During setup.bat</h4>
+        <p>When prompted <em>"Install NPU/DirectML support? [y/N]"</em>, type <code>y</code> and press Enter.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h4>Or manually at any time</h4>
+        <pre><span class="comment"># Standard ONNX DirectML stack (for Phi-3 / Phi-3.5 ONNX models):</span>
+<span class="cmd">pip install</span> onnxruntime-directml "optimum[onnxruntime]" transformers huggingface-hub
+
+<span class="comment"># Plus onnxruntime-genai-directml for Phi-4 / Phi-4-mini ONNX bundles:</span>
+<span class="cmd">pip install</span> onnxruntime-genai-directml</pre>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h4>Verify in the app</h4>
+        <p>Open the <strong>System</strong> tab. It will show:<br>
+           <em>"ONNX Runtime DirectML: Available (NPU/DirectML acceleration ready)"</em></p>
+      </div>
+    </div>
+  </div>
+
+  <h3>NPU-Capable Models</h3>
+  <p>The following models have ONNX versions and run on the NPU:</p>
+  <ul style="margin: 8px 0 8px 24px; line-height: 2;">
+    <li><strong>Phi-3 Mini 4K</strong> &mdash; <code>microsoft/Phi-3-mini-4k-instruct-onnx</code></li>
+    <li><strong>Phi-3.5 Mini</strong> &mdash; <code>microsoft/Phi-3.5-mini-instruct-onnx</code></li>
+    <li><strong>Phi-4 / Phi-4-mini ONNX bundles</strong> &mdash; require
+      <code>onnxruntime-genai-directml</code> (their Grouped-Query-Attention KV layout
+      breaks <code>optimum.onnxruntime</code>)</li>
+  </ul>
+  <p>Select <em>"NPU/DirectML (ONNX)"</em> in the Chat backend dropdown before loading these models.</p>
+
+  <div class="alert alert-info">
+    <strong>Phi-4 ONNX runtime note.</strong> Phi-4 bundles ship a <code>genai_config.json</code>
+    and must route through <code>onnxruntime-genai-directml</code> (DirectML),
+    <code>onnxruntime-genai-cuda</code> (CUDA), or plain <code>onnxruntime-genai</code> (CPU).
+    The package variant determines the execution provider &mdash; there is no provider-string knob,
+    and OpenVINO EP is not supported by <code>onnxruntime-genai-directml</code>. For CPU runs,
+    the app prefers the CPU subfolder bundled in the same repository.
+  </div>
+</section>
+
+<!-- ── UI Guide ──────────────────────────────────────────────────────────── -->
+<section id="ui">
+  <h2>Using the Application</h2>
+
+  <h3>Models Tab</h3>
+  <p>Browse the 48 curated built-in models, and extend the catalog yourself with
+     <strong>+ Add from Hugging Face</strong> on the Models page header — paste a Hugging Face URL
+     (or an <code>ollama:</code> tag) and the dialog turns it into a SHA-pinned catalog entry without
+     leaving the app. User-added rows show a <em>(yours)</em> badge and have a
+     <strong>Remove from catalog</strong> button in the detail pane. Filter by category
+     (Ultra Small / Small / Medium / Large / Extra Large / Vision / Image Generation / Speech /
+     Embeddings / Document AI) or by hardware fit to see models matched to your available RAM and VRAM.
+     Each card shows parameters, disk size, minimum RAM/VRAM, context length, and download status.
+     Buttons available per model:</p>
+  <table>
+    <tr><th>Button</th><th>Action</th></tr>
+    <tr><td><strong>Download</strong></td><td>Pulls the model via Ollama (LLMs) or downloads the checkpoint file (image models). Shows live progress in the status bar.</td></tr>
+    <tr><td><strong>Load &amp; Chat</strong></td><td>Loads the model and switches to the Chat tab (LLMs only).</td></tr>
+    <tr><td><strong>Generate Images</strong></td><td>Opens the Image Gen tab with the model pre-selected (image models only).</td></tr>
+    <tr><td><strong>Delete</strong></td><td>Removes the model from local storage immediately. Works for both LLMs (via Ollama) and image generation models (deletes the checkpoint file).</td></tr>
+  </table>
+
+  <h3>Chat Tab</h3>
+  <p>
+    Select a backend (<em>GPU/CPU</em>, <em>CPU only</em>, or <em>NPU/DirectML</em>),
+    load a model from the Models tab, then type messages and press <kbd>Enter</kbd>.
+    Hold <kbd>Shift+Enter</kbd> for a newline. Press <strong>Stop</strong> to cancel
+    mid-generation.
+  </p>
+  <p>
+    Not sure what to ask? Click the <strong>Prompt ideas</strong> link
+    at the bottom of the Chat tab, or browse the
+    <a href="Model-Guide.html" style="color:var(--accent)">Model Guide</a>
+    for showcase prompts tailored to every supported model.
+  </p>
+
+  <h3>Benchmark Tab</h3>
+  <p>
+    Run every selected text, ONNX, utility, and image-gen model without manual interaction.
+    Pick the <strong>Benchmark profile</strong> matching your hardware (your local machine plus any
+    SKU profiles you've defined in <code>skus.json</code>) to set the capacity used
+    for default selections and runner filtering, then choose a <strong>Run mode</strong>:
+  </p>
+  <ul>
+    <li><strong>Quick</strong> &mdash; one shared prompt per selected text/utility model. The
+      fast smoke test you've always had; finishes in minutes for a small selection.
+      <strong>Calibrated for ≤15 min on the smallest CPU-only SKU</strong> (the slowest supported
+      profile): 17 chat / vision models on every SKU, plus one image row on GPU
+      profiles (<code>realistic-vision-v6</code> on entry-level GPUs, <code>playground v2.5</code>
+      on standard GPUs and up). Every default-ticked model is expected to pass.</li>
+    <li><strong>Extended</strong> &mdash; iterates each model's curated sample prompts
+      (three per chat/utility model) and, on GPU-capable profiles, generates a sample image
+      for every default-ticked image-gen model. The <em>Include image-gen models</em> checkbox
+      controls whether image runs are queued. Extended default-ticks every verified passer
+      for the current SKU (sized to that SKU's chat/vision/utility/image budget).
+      Extended takes longer but is still expected to pass for
+      every ticked model.</li>
+    <li><strong>Demo</strong> &mdash; runs a curated fast showcase subset: GPU profiles use
+      GPU-only text and image rows, while CPU-only profiles use CPU-only text rows. Demo
+      mode is intended for short, repeatable demos on cloud VMs without exercising the
+      full catalog.</li>
+  </ul>
+  <p>
+    Models are grouped by category in collapsible <strong>banded cards</strong> &mdash; Ultra
+    Small, Small, Medium, Large, Extra Large, Vision, Speech, Embeddings, Document AI, and
+    (Extended/Demo on GPU profiles) Image Generation. Every card has a <strong>select-all checkbox</strong>
+    in its header that toggles every eligible row in that category at once; rows the current
+    profile can't run stay disabled and unchecked regardless. The Start / Stop / Retry Failed /
+    Open Report Folder / Open HTML Report / Copy CLI Command buttons are pinned in a
+    <strong>static bottom panel</strong> so they stay reachable even while the activity log
+    grows during a long run. If your selection includes image-gen models and ComfyUI isn't
+    running yet, the benchmark will start it automatically; if ComfyUI crashes mid-run,
+    the runner restarts it once and retries the failed generation before moving on.
+  </p>
+  <p>
+    Reports are written as paired <strong>JSON + HTML</strong> in
+    <code>benchmark_results/</code>. Click <strong>"Open HTML Report"</strong> for the
+    themed results page with surface tabs (Text / Utility / Image / Failed), live status
+    filter, embedded thumbnails with click-to-zoom, and a light/dark theme toggle. Both
+    a per-mode <code>latest_quick_benchmark.html</code>/<code>latest_extended_benchmark.html</code>
+    alias and the legacy <code>batch_results.html</code> alias are updated after every
+    completed run. Click <strong>"Copy CLI Command"</strong> to get the equivalent command
+    line (including <code>--run-mode extended</code> and <code>--skip-image</code> flags
+    when applicable) for automation or scheduling.
+  </p>
+
+  <h3>System Tab</h3>
+  <p>Live hardware dashboard showing CPU usage, RAM, GPU VRAM, disk space, and detected NPU devices.
+     Refreshes every 5 seconds automatically while the tab is open.</p>
+
+  <h3>Logs Tab</h3>
+  <p>Filter logs by level (DEBUG / INFO / WARNING / ERROR). All events are also saved to
+     <code>LocalAI\localai.log</code>.</p>
+
+  <h3>Settings Tab</h3>
+  <table>
+    <tr><th>Setting</th><th>Description</th></tr>
+    <tr><td>Ollama Host</td><td>URL where Ollama is running (default: <code>http://localhost:11434</code>)</td></tr>
+    <tr><td>ComfyUI Host</td><td>URL where ComfyUI is running (default: <code>http://127.0.0.1:8188</code>)</td></tr>
+    <tr><td>ComfyUI Directory</td><td>Path to the ComfyUI installation folder</td></tr>
+    <tr><td>Models Directory</td><td>Where ONNX model files are stored locally</td></tr>
+    <tr><td>Dark Mode</td><td>Toggle between dark and light theme</td></tr>
+    <tr><td>Auto-start Ollama</td><td>Automatically launch Ollama on app start</td></tr>
+    <tr><td>Temperature</td><td>Controls randomness (0 = deterministic, 1 = creative)</td></tr>
+  </table>
+  <h4 style="margin-top:14px;">Model Management</h4>
+  <table>
+    <tr><th>Button</th><th>Description</th></tr>
+    <tr><td>Delete All Downloaded Models</td><td>Removes every Ollama model at once</td></tr>
+    <tr><td>Open Models Folder</td><td>Opens the ONNX models directory in Explorer</td></tr>
+  </table>
+  <h4 style="margin-top:14px;">Model Catalog</h4>
+  <table>
+    <tr><th>Button</th><th>Description</th></tr>
+    <tr><td>Reload Catalog</td><td>Re-read <code>models_catalog.json</code> and refresh model cards</td></tr>
+    <tr><td>Open Catalog File</td><td>Open <code>models_catalog.json</code> in your default editor</td></tr>
+    <tr><td>Reset to Defaults</td><td>Overwrite the catalog with the built-in default model list</td></tr>
+  </table>
+  <h4 style="margin-top:14px;">Hardware Fit Guidance</h4>
+  <table>
+    <tr><th>Hardware profile</th><th>Typical fit</th><th>Recommended models</th></tr>
+    <tr><td>CPU only or integrated GPU</td><td>Chat, summaries, light reasoning</td><td>Ultra Small and Small language models</td></tr>
+    <tr><td>4 GB VRAM GPU</td><td>Fast local chat and entry image generation</td><td>Small language models, SD 1.5, Realistic Vision</td></tr>
+    <tr><td>8 GB VRAM GPU</td><td>Balanced chat and image generation</td><td>Medium language models, SDXL, Flux Schnell Q4</td></tr>
+    <tr><td>12 GB VRAM GPU</td><td>Higher-quality image generation and larger chat models</td><td>Large language models, Flux Dev Q4, Z-Image, Chroma</td></tr>
+    <tr><td>24 GB VRAM GPU</td><td>Maximum local quality</td><td>Extra Large language models and Flux Dev FP16</td></tr>
+  </table>
+
+  <h3>Image Gen Tab</h3>
+  <p>
+    Generate images locally using <strong>ComfyUI</strong> as the backend. ComfyUI must be
+    installed (run <code>setup.bat</code>) and running before images can be generated.
+    The sidebar footer shows the live ComfyUI connection status.
+  </p>
+  <p>
+    Selecting a model from the dropdown automatically applies optimal defaults for that model family
+    (resolution, sampler, scheduler, steps, and CFG). Use <strong>Reference &rarr; Analyze &rarr; Prompt</strong>
+    to automatically generate a prompt from any photo using the <code>llama3.2-vision:11b</code> vision model.
+    See the <a href="image-gen-guide.html" style="color:var(--accent)">Image Generation Feature Guide</a>
+    for a full walkthrough of every control.
+  </p>
+
+  <h3>Closing the App</h3>
+  <p>If you downloaded any models during the session, the app asks whether to delete them to free disk space.
+     Choose <strong>Yes</strong> to delete, <strong>No</strong> to keep, or <strong>Cancel</strong>
+     to stay in the app. You can also manage models manually from the Settings tab at any time.</p>
+</section>
+
+<!-- ── Image Generation ──────────────────────────────────────────────────── -->
+<section id="image-gen">
+  <h2>Image Generation</h2>
+  <p>
+    LocalAI Studio generates images locally using <strong>ComfyUI</strong> as the inference backend.
+    Eleven image models are available across four families: SD 1.5, SDXL, Flux, and Z-Image.
+    See the <a href="image-gen-guide.html" style="color:var(--accent)">Image Generation Feature Guide</a>
+    for a complete walkthrough of every control, model comparison table, prompt tips, and the
+    Analyze &rarr; Prompt feature.
+  </p>
+
+  <h3>Quick Start</h3>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h4>Install ComfyUI</h4>
+        <p>Run <code>setup.bat</code> and choose to install ComfyUI when prompted, or run it at any
+           time from <strong>Settings &rarr; Install ComfyUI</strong>.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h4>Download an image model</h4>
+        <p>Go to the <strong>Models</strong> tab, filter by <em>Image Generation</em>, and click
+           <strong>Get Model</strong> on a model. The app checks disk space first and shows download
+           progress in the status bar. To remove a downloaded model, click <strong>Delete</strong>.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h4>Generate</h4>
+        <p>Click <strong>Generate Images</strong> on the model card, or open the <strong>Image Gen</strong>
+           tab directly. Enter a prompt and click <strong>Generate</strong>.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-info">
+    <strong>Flux GGUF:</strong> Flux Schnell and Flux Dev Q4 require the ComfyUI-GGUF custom node
+    and the <code>gguf</code> Python package — both installed automatically on first use along with
+    the required CLIP encoders and VAE.
+    GGUF models are stored in <code>ComfyUI\models\diffusion_models\</code>;
+    standard checkpoints go in <code>ComfyUI\models\checkpoints\</code>.
+  </div>
+</section>
+
+<!-- ── Toolbox ──────────────────────────────────────────────────────────── -->
+<section id="toolbox">
+  <h2>Toolbox</h2>
+  <p>
+    The <strong>Toolbox</strong> tab is the user-facing surface for non-chat utility workflows.
+    First runs may download model files and install Python packages; everything afterward runs
+    locally on your hardware with no cloud calls.
+  </p>
+
+  <h3>Workflows</h3>
+  <ul class="feature-list">
+    <li><strong>Transcribe</strong> — Whisper Large v3 Turbo on audio files</li>
+    <li><strong>Read image text</strong> — Florence-2 / TrOCR best-effort OCR</li>
+    <li><strong>Find tables</strong> — Table Transformer region detection</li>
+    <li><strong>Speak</strong> — SpeechT5 TTS, WAV output</li>
+    <li><strong>Search</strong> — All-MiniLM semantic snippet search</li>
+    <li><strong>Describe</strong> — Florence-2 image captioning</li>
+  </ul>
+
+  <div class="alert alert-info">
+    <strong>One install or run at a time.</strong> Toolbox workflows are single-flight: only one
+    install or workflow runs at a time so pip and Hugging Face downloads do not compete for the
+    shared package directory or VRAM. Downloads land in <code>.cache\huggingface</code> by default
+    (relative to the LocalAI install path), and the app honors an ambient <code>HF_HOME</code> if you
+    set one.
+  </div>
+
+  <h3>What you'll see</h3>
+  <p>
+    The Toolbox page has a compact workflow browser on the left and a shared detail / result /
+    activity panel on the right. Progress text and the final result area are kept separate, and
+    each workflow exposes <strong>Open output</strong> and <strong>Open folder</strong> shortcuts
+    for the files it generates.
+  </p>
+</section>
+
+<!-- ── Batch Benchmark ───────────────────────────────────────────────────── -->
+<section id="benchmark">
+  <h2>Batch Benchmark Mode</h2>
+  <p>
+    LocalAI Studio includes a headless batch mode that automatically downloads, runs, and benchmarks
+    every catalog model across every supported inference method (GPU, CPU, NPU/DirectML).
+    It produces structured JSON and human-readable text reports showing which models your system
+    can handle and how fast they run.
+  </p>
+
+  <h3>Running from the GUI</h3>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h4>Open the Benchmark tab</h4>
+        <p>Click <strong>Benchmark</strong> in the sidebar. Configure your test prompt,
+           timeout, which inference methods to test, and optionally filter to specific models.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h4>Click Start Benchmark</h4>
+        <p>The benchmark runs model by model (smallest first), streaming progress into the output log.
+           Press <strong>Stop</strong> at any time &mdash; the partial report is saved automatically.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h4>View reports</h4>
+        <p>When finished, click <strong>Open Report Folder</strong> to find
+           <code>batch_results.json</code> and <code>batch_results.txt</code> in the
+           <code>benchmark_results/</code> directory.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-info">
+    <strong>Tip:</strong> Use the <strong>"Copy CLI Command"</strong> button to get the equivalent
+    command-line invocation matching your current GUI settings. This is useful for scheduling
+    benchmarks via Task Scheduler or running them on headless machines.
+  </div>
+
+  <h3>Running from the Command Line</h3>
+  <p>Use <code>run_batch.py</code> directly for headless / automated benchmarking:</p>
+  <pre><span class="comment"># List all available models</span>
+<span class="cmd">python</span> run_batch.py --list-models
+
+<span class="comment"># Benchmark one small model (skip ONNX), 2-minute timeout</span>
+<span class="cmd">python</span> run_batch.py --models qwen2.5:0.5b --skip-onnx --timeout 120
+
+<span class="comment"># Full benchmark of all models, save to a custom folder</span>
+<span class="cmd">python</span> run_batch.py --output results/
+
+<span class="comment"># GPU only, clean up models after testing</span>
+<span class="cmd">python</span> run_batch.py --skip-cpu --skip-onnx --cleanup</pre>
+
+  <p>Or use the Windows launcher which auto-starts Ollama:</p>
+  <pre><span class="comment"># Runs all models with defaults</span>
+<span class="ok">double-click</span> run_batch.bat
+
+<span class="comment"># With custom arguments</span>
+<span class="cmd">run_batch.bat</span> --models phi3:mini phi3.5:mini --timeout 180</pre>
+
+  <h3>CLI Options Reference</h3>
+  <table>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>--prompt TEXT</code></td><td>"Explain what a neural network is in simple terms."</td>
+        <td>The test prompt sent to every model</td></tr>
+    <tr><td><code>--timeout SECS</code></td><td>300</td>
+        <td>Per-run timeout in seconds</td></tr>
+    <tr><td><code>--cleanup</code></td><td>off</td>
+        <td>Delete each model after testing to save disk space</td></tr>
+    <tr><td><code>--models ID [ID ...]</code></td><td>all</td>
+        <td>Only test specific model IDs (space-separated)</td></tr>
+    <tr><td><code>--skip-gpu</code></td><td>off</td>
+        <td>Skip Ollama GPU tests</td></tr>
+    <tr><td><code>--skip-cpu</code></td><td>off</td>
+        <td>Skip Ollama CPU tests</td></tr>
+    <tr><td><code>--skip-onnx</code></td><td>off</td>
+        <td>Skip all ONNX tests (DirectML + CPU)</td></tr>
+    <tr><td><code>--max-failures N</code></td><td>5</td>
+        <td>Stop early after N consecutive failures</td></tr>
+    <tr><td><code>--output DIR</code></td><td>. (current dir)</td>
+        <td>Directory for report files</td></tr>
+    <tr><td><code>--list-models</code></td><td>&mdash;</td>
+        <td>Print model catalog table and exit</td></tr>
+  </table>
+
+  <h3>Inference Methods Tested</h3>
+  <table>
+    <tr><th>Method</th><th>How it works</th><th>Applies to</th></tr>
+    <tr><td><code>ollama_gpu</code></td><td>Ollama with <code>num_gpu=-1</code> (auto GPU offload)</td>
+        <td>All models with an <code>ollama_tag</code></td></tr>
+    <tr><td><code>ollama_cpu</code></td><td>Ollama with <code>num_gpu=0</code> (forced CPU only)</td>
+        <td>All models with an <code>ollama_tag</code></td></tr>
+    <tr><td><code>onnx_directml</code></td><td>ONNX Runtime with DirectML provider (NPU/GPU)</td>
+        <td>Models with an <code>onnx_repo</code> (Phi-3 Mini, Phi-3.5 Mini)</td></tr>
+    <tr><td><code>onnx_cpu</code></td><td>ONNX Runtime with CPU provider</td>
+        <td>Models with an <code>onnx_repo</code></td></tr>
+  </table>
+
+  <h3>Report Output</h3>
+  <p>Two files are produced after every run (including interrupted runs):</p>
+  <div class="card-grid">
+    <div class="card">
+      <h4>batch_results.json</h4>
+      <p>Full structured data: every run result with model ID, method, timing
+         (tokens/s, TTFT, total time, load time), response text, raw Ollama nanosecond stats,
+         and a system resource snapshot.</p>
+    </div>
+    <div class="card">
+      <h4>batch_results.txt</h4>
+      <p>Human-readable table with one row per run showing model, method, status,
+         tokens/sec, time-to-first-token, total time, and token count.
+         Includes a pass/fail summary at the bottom.</p>
+    </div>
+  </div>
+
+  <h3>Timing Data</h3>
+  <table>
+    <tr><th>Backend</th><th>Source</th><th>Metrics</th></tr>
+    <tr>
+      <td>Ollama</td>
+      <td>Native nanosecond timing from the <code>done=true</code> response chunk</td>
+      <td><code>total_duration</code>, <code>load_duration</code>, <code>eval_duration</code>,
+          <code>eval_count</code>, tokens/sec</td>
+    </tr>
+    <tr>
+      <td>ONNX</td>
+      <td>Manual <code>time.perf_counter()</code> instrumentation</td>
+      <td>Total time, time-to-first-token (TTFT), token count, tokens/sec</td>
+    </tr>
+  </table>
+
+  <h3>Execution Behaviour</h3>
+  <ul style="margin: 8px 0 8px 24px; line-height: 2;">
+    <li>Models are tested smallest-to-largest by disk size</li>
+    <li>A pre-flight hardware check skips models that exceed available RAM/VRAM</li>
+    <li>Models are downloaded automatically if not already local</li>
+    <li>Each run uses <code>temperature=0.0</code> for deterministic output</li>
+    <li>Runs are wrapped in a per-model timeout (default 5 min)</li>
+    <li>The benchmark stops early after N consecutive failures (configurable)</li>
+    <li>Pressing Ctrl+C (CLI) or Stop (GUI) finishes the current run and saves a partial report</li>
+    <li>With <code>--cleanup</code>, models are deleted after testing to save disk space</li>
+  </ul>
+
+  <div class="alert alert-warning">
+    <strong>Storage note:</strong> A full benchmark may need to download every model in the catalog.
+    Ensure you have enough disk space (check the model table above) or use <code>--cleanup</code>
+    to delete each model after testing.
+  </div>
+</section>
+
+<!-- ── Troubleshooting ───────────────────────────────────────────────────── -->
+<section id="troubleshoot">
+  <h2>Troubleshooting</h2>
+
+  <table>
+    <tr><th>Problem</th><th>Solution</th></tr>
+    <tr>
+      <td>Sidebar shows "Ollama not installed"</td>
+      <td>Download from <a href="https://ollama.com/download/windows" style="color:var(--accent)">ollama.com/download/windows</a>,
+          install it, then restart the app. Or re-run <code>setup.bat</code>.</td>
+    </tr>
+    <tr>
+      <td>Download button is greyed out</td>
+      <td>Ollama must be running. Check the sidebar status. If it says "Ollama not running", restart the app
+          (it will try to start Ollama automatically) or start Ollama manually: <code>ollama serve</code></td>
+    </tr>
+    <tr>
+      <td>"Not enough disk space" error</td>
+      <td>Free up space on your drive, then try again. The app requires ~10% extra buffer above the model size.</td>
+    </tr>
+    <tr>
+      <td>Chat is very slow</td>
+      <td>You are running on CPU. For GPU acceleration, ensure your GPU driver is up to date.
+          Check the System tab to verify GPU detection. Select a smaller model for faster responses.</td>
+    </tr>
+    <tr>
+      <td>NPU option has no effect</td>
+      <td>Install ONNX Runtime DirectML (see NPU Setup section). The System tab shows whether DirectML is available.</td>
+    </tr>
+    <tr>
+      <td>App crashes on start</td>
+      <td>Check <code>LocalAI\localai.log</code> for details. Most common cause: missing Python package.
+          Re-run <code>setup.bat</code>.</td>
+    </tr>
+    <tr>
+      <td>Model load hangs forever</td>
+      <td>The model may be larger than your available RAM. Press <strong>Stop</strong>, choose a smaller model,
+          or close other applications to free memory.</td>
+    </tr>
+    <tr>
+      <td>Intel Arc / iGPU not used</td>
+      <td>Ollama supports Intel Arc via SYCL. Ensure your Intel GPU driver is current
+          (<a href="https://www.intel.com/content/www/us/en/download-center/home.html" style="color:var(--accent)">intel.com/download</a>).</td>
+    </tr>
+    <tr>
+      <td>Ollama pulls fail with "no space left on device" even though the disk has plenty of room</td>
+      <td>Some Windows machines have a size-capped user profile — common on corporate or
+          managed devices and on any roamed profile setup. Once that profile fills with Ollama
+          blobs, the next pull fails with <code>OSError 28</code> / "no space left" even though
+          <code>Get-PSDrive</code> shows hundreds of GB available. Relocate Ollama's models
+          directory <em>outside</em> the profile by running the shipped helper
+          <code>set_ollama_models_dir.bat</code> from your LocalAI folder. The helper defaults
+          to <code>&lt;app path&gt;\Ollama</code> (a subfolder next to the LocalAI app itself)
+          so blobs sit on whatever drive you installed LocalAI to — no hardcoded drive letter
+          assumptions.
+          <pre><span class="comment"># Easiest: run the shipped helper</span>
+cd path\to\LocalAI
+set_ollama_models_dir.bat
+
+<span class="comment"># Or set it yourself at user scope (then restart Ollama)</span>
+setx OLLAMA_MODELS "C:\LocalAI\Ollama"</pre>
+          You can also change this from inside the app via
+          <strong>Settings → Ollama Models Directory</strong>. The app writes
+          <code>OLLAMA_MODELS</code> for you and warns if any of your three storage folders
+          (Models, ComfyUI, Ollama) lives on a different drive than the app itself (acceptable, but
+          if that drive disappears the models go with it). <strong>Important:</strong>
+          <code>OLLAMA_MODELS</code> is consumed by the Ollama daemon, which is shared
+          infrastructure — every other app on this PC that talks to Ollama (Open-WebUI,
+          Continue.dev, other LLM front-ends) will also start reading models from the new location
+          after the daemon restarts. The benchmark runner detects this disk-pressure failure mode
+          and skips affected rows with an <code>environment_skip</code> failure phase so smaller
+          models still run.</td>
+    </tr>
+    <tr>
+      <td>Setup or model download fails partway through with "No space left on device"</td>
+      <td>v5.4.10 redirects every cache LocalAI touches (pip, Hugging Face, PyTorch, TMP, Ollama)
+          into a <code>.cache</code> folder next to the app itself. If your home directory has a
+          small quota or a roamed-profile cap, the install no longer needs to fit there. If you
+          hit this on a previous version: re-run <code>setup.bat</code> (or <code>fix_nvidia_pytorch.bat</code>
+          for the CUDA path, or <code>fix_directml_pytorch.bat</code> for the DirectML path on Intel /
+          AMD / AI PC) from v5.4.10 — they prepend
+          <code>PIP_CACHE_DIR=%~dp0.cache\pip</code> and friends before the first <code>pip install</code>
+          so the multi-GB CUDA wheel lands on the install drive.</td>
+    </tr>
+    <tr>
+      <td>An earlier ComfyUI / Models / Ollama move was interrupted and now things look broken</td>
+      <td>v5.4.10 adds a self-healing layer that runs at startup:
+        <ul>
+          <li><strong>Resume / Roll back / Decide later</strong> dialog when a previous migration
+              left a <code>.localai-migration-state.json</code> lock file (interrupted copy or
+              verify phase).</li>
+          <li><strong>Orphan-blob recovery</strong> when an Ollama directory contains blob files
+              but no matching manifests — choose Recover (re-copies from the original location with
+              full manifest <em>↔</em> blob cross-validation) or Discard (frees the space, irreversible).</li>
+          <li><strong>Pre-flight free-space gate</strong> — refuses to start a migration unless
+              the target drive has the full source size plus 10% headroom, with same-volume moves
+              (metadata-only renames) recognised as zero-cost.</li>
+          <li><strong>Cancel is always safe</strong> — pressing Cancel during a migration leaves
+              your original files exactly where they were and removes the partial target.</li>
+        </ul>
+        Set <code>LOCALAI_SUPPRESS_STARTUP_PROMPTS=1</code> to skip every self-healing prompt
+        (used by the publish smoke-test gate; not needed by end users).</td>
+    </tr>
+  </table>
+</section>
+
+<!-- ── Portability ───────────────────────────────────────────────────────── -->
+<section id="portable">
+  <h2>Portability — Moving to Another PC</h2>
+
+  <div class="alert alert-success">
+    <strong>Designed to be portable.</strong> Copy the entire <code>LocalAI</code> folder
+    to a USB drive or network share and run <code>setup.bat</code> once on the new machine.
+  </div>
+
+  <h3>What travels with the folder</h3>
+  <ul style="margin: 8px 0 8px 24px; line-height: 2;">
+    <li>All application source code</li>
+    <li>Your <code>config.json</code> (settings)</li>
+    <li>ONNX model files (in <code>LocalAI\models\</code>)</li>
+    <li>The log file (<code>localai.log</code>)</li>
+  </ul>
+
+  <h3>What stays behind (must re-download on new PC)</h3>
+  <ul style="margin: 8px 0 8px 24px; line-height: 2;">
+    <li>Python and Python packages — re-run <code>setup.bat</code></li>
+    <li>Ollama — re-run <code>setup.bat</code></li>
+    <li>Ollama model files — stored in <code>%USERPROFILE%\.ollama\models</code> (Windows)
+        (you can copy this folder manually if you want to avoid re-downloading)</li>
+  </ul>
+
+  <h3>Moving Ollama model cache (optional)</h3>
+  <p>To avoid re-downloading large models, copy the Ollama model directory:</p>
+  <pre><span class="comment"># Source PC: copy this folder to USB / network drive</span>
+%USERPROFILE%\.ollama\models
+
+<span class="comment"># Target PC: place it at the same path</span>
+C:\Users\&lt;username&gt;\.ollama\models</pre>
+</section>
+
+<!-- ── Uninstall ──────────────────────────────────────────────────────────── -->
+<section id="uninstall">
+  <h2>Uninstalling LocalAI Studio</h2>
+  <p>
+    To completely remove LocalAI Studio and restore your system to its pre-installation state,
+    run <code>uninstall.bat</code>. It walks you through each component interactively —
+    you choose what to remove.
+  </p>
+
+  <pre><span class="comment"># Windows:</span>
+<span class="ok">double-click</span> uninstall.bat</pre>
+
+  <h3>What It Removes (Step by Step)</h3>
+  <p>Each step is optional — answer <code>y</code> to remove or <code>n</code> to skip.</p>
+
+  <table>
+    <tr><th>Step</th><th>Component</th><th>Location</th><th>Notes</th></tr>
+    <tr>
+      <td>1</td>
+      <td><strong>Stop running processes</strong></td>
+      <td>—</td>
+      <td>Stops Ollama if running. Checks for active Python processes.</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>Ollama downloaded models</strong></td>
+      <td><code>%USERPROFILE%\.ollama\models</code></td>
+      <td>All LLM model files pulled via Ollama. Warning: shared by all Ollama apps.</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>ComfyUI &amp; image models</strong></td>
+      <td><code>&lt;LocalAI app folder&gt;\ComfyUI</code> (default since v5.3.9 — next to the app)<br>or whatever path is in <strong>Settings → ComfyUI Directory</strong></td>
+      <td>ComfyUI installation, SD/SDXL/Flux checkpoints, CLIP encoders, VAE files, custom nodes.</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><strong>ONNX &amp; HuggingFace cache</strong></td>
+      <td><code>LocalAI\models\</code> and <code>%USERPROFILE%\.cache\huggingface</code></td>
+      <td>Local ONNX model files and HuggingFace download cache. HF cache warning: shared by other tools.</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td><strong>Python pip packages</strong></td>
+      <td>Python site-packages</td>
+      <td>Choose to remove: (a) all packages, (b) only ONNX/DirectML, (c) only image/torch packages, or (d) skip.</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td><strong>Ollama application</strong></td>
+      <td><code>%LocalAppData%\Programs\Ollama</code></td>
+      <td>Uninstalls Ollama via winget. Optionally deletes the <code>.ollama</code> config folder.</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td><strong>Python</strong></td>
+      <td>System install</td>
+      <td>Uninstalls Python 3.13/3.12 via winget. Warning: only do this if setup.bat installed it.</td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td><strong>LocalAI application folder</strong></td>
+      <td><code>LocalAI\</code> (this folder)</td>
+      <td>Cleans generated files (logs, caches, configs). Provides a command to delete the folder after the script exits.</td>
+    </tr>
+  </table>
+
+  <div class="alert alert-warning">
+    <strong>Shared components:</strong> Ollama, Python, and the HuggingFace cache may be used by
+    other applications. The uninstaller warns you before removing these — only say <code>y</code>
+    if you are sure nothing else depends on them.
+  </div>
+
+  <h3>Partial Cleanup</h3>
+  <p>If you just want to free disk space without fully uninstalling:</p>
+  <ul style="margin: 8px 0 8px 24px; line-height: 2;">
+    <li>Delete specific models from the <strong>Models</strong> tab (click <strong>Delete</strong> on each card)</li>
+    <li>Use <strong>Settings &rarr; Delete All Models</strong> to remove all Ollama models at once</li>
+    <li>Run <code>cleanup.bat</code> to remove dev/test files and caches without touching models or apps</li>
+  </ul>
+</section>
+
+</main>
+</div>
+
+<div class="empty" id="empty" role="status" aria-live="polite">No sections match your search.</div>
+
+<footer class="page-footer">
+  <a href="index.html">LocalAI Studio Docs</a> &middot;
+  <a href="Model-Guide.html">Model Guide</a> &middot;
+  <a href="image-gen-guide.html">Image Gen Guide</a>
+  <br>
+  <span>LocalAI Studio v2026.06.01.6 &middot; Ron Martinsen &middot; Apache 2.0 License</span>
+</footer>
+
+<script>
+  const root = document.documentElement;
+  const btn = document.getElementById("theme-toggle");
+  function setThemeLabel() {
+    const isDark = root.getAttribute("data-theme") === "dark";
+    if (btn) {
+      btn.textContent = isDark ? "☀ Light" : "🌙 Dark";
+      btn.setAttribute("aria-label", isDark ? "Switch to light theme" : "Switch to dark theme");
+    }
+  }
+  setThemeLabel();
+  if (btn) {
+    btn.addEventListener("click", () => {
+      const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("localai-docs-theme", next); } catch (e) {}
+      setThemeLabel();
+    });
+  }
+
+  function updateStickyOffset() {
+    const hdr = document.getElementById("page-header");
+    const tb = document.getElementById("toolbar");
+    if (!hdr) return;
+    const headerH = hdr.offsetHeight;
+    const toolbarH = tb ? tb.offsetHeight : 0;
+    document.documentElement.style.setProperty("--header-h", headerH + "px");
+    // scroll-offset = sticky stack + small visual buffer so headings don't
+    // sit flush against the toolbar's lower border after a jump.
+    document.documentElement.style.setProperty("--scroll-offset", (headerH + toolbarH + 20) + "px");
+  }
+  updateStickyOffset();
+  if ("ResizeObserver" in window) {
+    const ro = new ResizeObserver(updateStickyOffset);
+    ro.observe(document.getElementById("page-header"));
+    const tbel = document.getElementById("toolbar");
+    if (tbel) ro.observe(tbel);
+  } else {
+    window.addEventListener("resize", updateStickyOffset);
+  }
+
+  const sections = document.querySelectorAll("main.content > section[id]");
+  const railLinks = document.querySelectorAll("#rail a[data-toc-link]");
+  function highlightActive() {
+    const hdr = document.getElementById("page-header");
+    const tb = document.getElementById("toolbar");
+    // Add a small lookahead (12 px) so the next section "activates" just before
+    // its heading slides under the toolbar, instead of one full scroll-tick after.
+    const offset = (hdr ? hdr.offsetHeight : 0) + (tb ? tb.offsetHeight : 0) + 12;
+    let current = "";
+    sections.forEach(s => { if (s.getBoundingClientRect().top - offset <= 0) current = s.id; });
+    railLinks.forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#" + current));
+  }
+  window.addEventListener("scroll", highlightActive, { passive: true });
+  setTimeout(highlightActive, 50);
+
+  const searchEl = document.getElementById("search");
+  const emptyEl = document.getElementById("empty");
+  const info = document.getElementById("toolbar-info");
+  const totalSections = sections.length;
+  function applySearch(q) {
+    q = q.trim().toLowerCase();
+    let visible = 0;
+    sections.forEach(s => {
+      const hit = !q || s.textContent.toLowerCase().includes(q);
+      s.style.display = hit ? "" : "none";
+      if (hit) visible++;
+    });
+    if (emptyEl) emptyEl.classList.toggle("visible", visible === 0 && !!q);
+    if (info) {
+      info.textContent = q
+        ? `${visible} section${visible === 1 ? "" : "s"} match "${q}"`
+        : `Showing all ${totalSections} sections`;
+    }
+    railLinks.forEach(a => {
+      const id = a.getAttribute("href").slice(1);
+      const sec = document.getElementById(id);
+      a.style.opacity = (sec && sec.style.display === "none") ? "0.35" : "1";
+    });
+  }
+  if (searchEl) {
+    let debounceId = null;
+    searchEl.addEventListener("input", e => {
+      clearTimeout(debounceId);
+      debounceId = setTimeout(() => applySearch(e.target.value), 200);
+    });
+  }
+
+  document.querySelectorAll(".density button").forEach(b => {
+    b.addEventListener("click", () => {
+      document.querySelectorAll(".density button").forEach(x => x.setAttribute("aria-pressed", "false"));
+      b.setAttribute("aria-pressed", "true");
+      document.body.classList.toggle("compact", b.dataset.density === "compact");
+      try { localStorage.setItem("localai-docs-density", b.dataset.density); } catch (e) {}
+      updateStickyOffset();
+    });
+  });
+  try {
+    const savedDensity = localStorage.getItem("localai-docs-density");
+    if (savedDensity === "compact") {
+      const cBtn = document.querySelector('.density button[data-density="compact"]');
+      if (cBtn) cBtn.click();
+    }
+  } catch (e) {}
+</script>
+
+<!-- ===================================================================
+     Rail / Table-of-Contents navigation accessibility + behaviour fix
+     Added 2026 by docs-nav fix pass. Self-contained and removable.
+     Fixes across all LocalAI docs pages:
+       1. Clicking a rail item now scrolls the matching section fully
+          to just below the sticky header (previously the section
+          landed ~half a screen too low because scroll-padding-top on
+          <html> AND scroll-margin-top on the section both applied,
+          doubling the offset).
+       2. The clicked rail item immediately becomes the active item
+          (and aria-current="true") instead of lagging behind.
+       3. Full keyboard support: Tab/Shift+Tab between rail items,
+          Up/Down/Left/Right + Home/End to move focus, Enter or Space
+          to jump to a section.
+       4. Screen-reader semantics: the rail is exposed as a navigation
+          landmark, the active item carries aria-current, and focus is
+          moved to the target section so assistive tech announces it.
+       5. Works identically in light and dark themes (uses theme vars).
+     =================================================================== -->
+<style id="docnav-a11y-style">
+  /* JavaScript owns the scroll math below, so neutralise the native
+     anchor offset to avoid the doubled gap. */
+  html { scroll-padding-top: 0 !important; }
+  /* Clear, theme-aware focus ring on rail items for keyboard users. */
+  #rail a:focus-visible,
+  aside.rail a:focus-visible {
+    outline: 2px solid var(--accent, #4ea1ff);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  /* The navigation target receives programmatic focus so screen readers
+     announce it. We only ever add tabindex="-1" to those targets, so this
+     reliably suppresses the focus box without touching real controls. */
+  [tabindex="-1"]:focus,
+  [tabindex="-1"]:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+  /* Keep aria-current visually consistent with the existing .active rule. */
+  #rail a[aria-current="true"],
+  aside.rail a[aria-current="true"] { font-weight: 600; }
+</style>
+<script id="docnav-a11y-script">
+(() => {
+  if (window.__docNavA11y) return;
+  window.__docNavA11y = true;
+
+  const rail = document.querySelector('#rail') || document.querySelector('aside.rail');
+  if (!rail) return;
+  if (!rail.getAttribute('role')) rail.setAttribute('role', 'navigation');
+  if (!rail.getAttribute('aria-label')) rail.setAttribute('aria-label', 'On this page');
+
+  const links = Array.from(rail.querySelectorAll('a[href^="#"]')).filter(a => {
+    const id = decodeURIComponent((a.getAttribute('href') || '').slice(1));
+    return id && document.getElementById(id);
+  });
+  if (!links.length) return;
+
+  const root = document.documentElement;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Distance (px) the target heading should sit from the viewport top so it
+  // clears the sticky header/toolbar stack. Prefer the page's own maintained
+  // CSS variable; fall back to measuring pinned sticky/fixed bars.
+  function offset() {
+    const cs = getComputedStyle(root);
+    let v = parseInt(cs.getPropertyValue('--scroll-offset'), 10);
+    if (!v) v = parseInt(cs.getPropertyValue('--sticky-top'), 10);
+    if (!v) {
+      document.querySelectorAll('header, .toolbar, .filter-bar, .surface-tabs, nav').forEach(el => {
+        const p = getComputedStyle(el).position;
+        const r = el.getBoundingClientRect();
+        if ((p === 'sticky' || p === 'fixed') && r.top <= 1 && r.bottom > 0) {
+          v = Math.max(v || 0, Math.round(r.bottom));
+        }
+      });
+    }
+    return (v || 0) + 10;
+  }
+
+  function targetOf(link) {
+    return document.getElementById(decodeURIComponent(link.getAttribute('href').slice(1)));
+  }
+
+  function setActive(link) {
+    links.forEach(a => {
+      const on = a === link;
+      a.classList.toggle('active', on);
+      if (on) a.setAttribute('aria-current', 'true');
+      else a.removeAttribute('aria-current');
+    });
+  }
+
+  function scrollToEl(el) {
+    const y = el.getBoundingClientRect().top + window.scrollY - offset();
+    window.scrollTo({ top: Math.max(0, y), behavior: reduce ? 'auto' : 'smooth' });
+  }
+
+  // While a programmatic (click/keyboard) jump is animating, lock the
+  // scroll-spy so the active item doesn't flicker through intermediate
+  // sections on the way to the target.
+  const LOCK_MS = reduce ? 0 : 800;
+  let lockUntil = 0;
+
+  function activate(link, moveFocus) {
+    const el = targetOf(link);
+    if (!el) return;
+    const det = el.closest('details');
+    if (det && !det.open) det.open = true;
+    setActive(link);
+    lockUntil = Date.now() + LOCK_MS;
+    // Two rAFs let any <details>/filter reflow settle before we measure.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      scrollToEl(el);
+      try { history.replaceState(null, '', link.getAttribute('href')); } catch (e) {}
+      if (moveFocus !== false) {
+        if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1');
+        setTimeout(() => { try { el.focus({ preventScroll: true }); } catch (e) {} }, reduce ? 0 : 350);
+      }
+      // Re-assert the chosen item once the lock lifts and the page has
+      // come to rest, so this script is the final writer of .active even
+      // when the page's own scroll-spy fought us during the animation.
+      setTimeout(() => { setActive(link); }, LOCK_MS + 60);
+      setTimeout(spy, LOCK_MS + 260);
+    }));
+  }
+
+  links.forEach((link, i) => {
+    link.addEventListener('click', e => { e.preventDefault(); activate(link, true); });
+    link.addEventListener('keydown', e => {
+      switch (e.key) {
+        case 'Enter':
+        case ' ':
+        case 'Spacebar':
+          e.preventDefault(); activate(link, true); break;
+        case 'ArrowDown':
+        case 'ArrowRight':
+          e.preventDefault(); links[(i + 1) % links.length].focus(); break;
+        case 'ArrowUp':
+        case 'ArrowLeft':
+          e.preventDefault(); links[(i - 1 + links.length) % links.length].focus(); break;
+        case 'Home':
+          e.preventDefault(); links[0].focus(); break;
+        case 'End':
+          e.preventDefault(); links[links.length - 1].focus(); break;
+      }
+    });
+  });
+
+  // Authoritative scroll-spy. Registered AFTER the page's own (if any), so
+  // when both run on a scroll event this one sets the final active state —
+  // overriding stale highlighting and adding it on pages that never had any.
+  const targets = links.map(l => ({ link: l, el: targetOf(l) })).filter(t => t.el);
+  let spyScheduled = false;
+  function spy() {
+    spyScheduled = false;
+    if (Date.now() < lockUntil) return;
+    const line = offset() + 6;
+    let current = null;
+    targets.forEach(t => {
+      const r = t.el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return; // hidden/collapsed
+      if (r.top - line <= 0) current = t.link;
+    });
+    if (!current && targets.length) {
+      const firstVisible = targets.find(t => {
+        const r = t.el.getBoundingClientRect();
+        return !(r.width === 0 && r.height === 0);
+      });
+      if (firstVisible) current = firstVisible.link;
+    }
+    if (current) setActive(current);
+  }
+  window.addEventListener('scroll', () => {
+    if (spyScheduled) return;
+    spyScheduled = true;
+    requestAnimationFrame(spy);
+  }, { passive: true });
+
+  // Correct native hash landing on first load and back/forward navigation.
+  function fixHash() {
+    if (!location.hash) return;
+    const el = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (!el) return;
+    const det = el.closest('details');
+    if (det) det.open = true;
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToEl(el)));
+  }
+  window.addEventListener('hashchange', fixHash);
+  window.addEventListener('load', () => setTimeout(fixHash, 80));
+  setTimeout(spy, 200);
+})();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
