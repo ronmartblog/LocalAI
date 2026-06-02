@@ -5265,5 +5265,176 @@ class Img2ImgDefaultPromptContractTests(unittest.TestCase):
         )
 
 
+class BenchmarkQuickFallbackContractTests(unittest.TestCase):
+    """v2026.06.01.8 — pin Quick-mode fallback for the synthetic
+    "This Device" profile so the public no-skus.json install does not
+    silently auto-tick every fitting model in Quick mode."""
+
+    def _capacity(self, *, has_gpu: bool) -> dict:
+        return {
+            "profile": "This Device",
+            "available_ram_gb": 64,
+            "total_ram_gb": 64,
+            "vram_capacity_gb": 24 if has_gpu else 0,
+            "has_gpu": has_gpu,
+            "is_sku": False,
+        }
+
+    def _make_app(self, *, run_mode: str = "quick"):
+        from src.app import App
+
+        class _ModeVar:
+            def __init__(self, mode):
+                self._mode = mode
+
+            def get(self):
+                return self._mode
+
+        app = object.__new__(App)
+        app._bench_run_mode_var = _ModeVar(
+            "Quick" if run_mode == "quick" else "Extended"
+        )
+        app._bench_methods_for_ui = lambda m: ["chat"]
+        app._bench_missing_deps_for_model = lambda m: []
+        app._is_image_model_ui = lambda m: bool(
+            (m.get("category") or "").startswith("Image")
+        )
+        # The fallback path must not consult skus.json — assert by
+        # forcing the SKU lookup to act as if no per-SKU set exists.
+        app._bench_observed_success_for_profile = lambda m, c: False
+        app._bench_profile_has_default_models = lambda profile, run_mode: False
+        return app
+
+    def test_quick_on_this_device_ticks_only_ultra_small_chat_on_cpu(self):
+        from src import catalog
+        from src.app import (
+            App, _bench_quick_fallback_model_ids,
+            _BENCH_QUICK_FALLBACK_IMAGE_GEN_ID,
+        )
+
+        app = self._make_app(run_mode="quick")
+        capacity = self._capacity(has_gpu=False)
+        fallback = _bench_quick_fallback_model_ids(has_gpu=False)
+        # The fallback set on a CPU box must equal the catalog's Ultra
+        # Small chat models — no image-gen, no Small or Medium chat.
+        catalog_ultra_small = {
+            m["id"] for m in catalog.MODELS if m.get("category") == "Ultra Small"
+        }
+        self.assertEqual(fallback, catalog_ultra_small)
+        self.assertNotIn(_BENCH_QUICK_FALLBACK_IMAGE_GEN_ID, fallback)
+
+        # Every Ultra Small chat model default-ticks under Quick.
+        for m in catalog.MODELS:
+            if m.get("category") != "Ultra Small":
+                continue
+            self.assertTrue(
+                app._bench_default_selected_for_model(m, capacity),
+                f"Ultra Small chat model {m.get('id')!r} must default-tick "
+                "in Quick on the synthetic This Device CPU profile.",
+            )
+
+        # A non-Ultra-Small chat model that fits must NOT default-tick.
+        small_chat_that_fits = {
+            "id": "small-chat-not-in-baseline",
+            "name": "Small Chat",
+            "category": "Small",
+            "ollama_tag": "small:latest",
+            "min_ram_gb": 4,
+            "min_vram_gb": 0,
+        }
+        self.assertFalse(
+            app._bench_default_selected_for_model(small_chat_that_fits, capacity),
+            "Quick on This Device must NOT auto-tick non-baseline chat models "
+            "even when they fit — that is the bug v2026.06.01.8 fixed.",
+        )
+
+    def test_quick_on_this_device_adds_smallest_image_gen_when_gpu(self):
+        from src import catalog
+        from src.app import (
+            _bench_quick_fallback_model_ids, _BENCH_QUICK_FALLBACK_IMAGE_GEN_ID,
+        )
+
+        # CPU box: image-gen MUST NOT be in the fallback set even if the
+        # GPU-only fitting branch is bypassed.
+        cpu_fallback = _bench_quick_fallback_model_ids(has_gpu=False)
+        self.assertNotIn(_BENCH_QUICK_FALLBACK_IMAGE_GEN_ID, cpu_fallback)
+
+        # GPU box: the image-gen fallback ID is added on top of the
+        # Ultra Small chat baseline.
+        gpu_fallback = _bench_quick_fallback_model_ids(has_gpu=True)
+        catalog_ultra_small = {
+            m["id"] for m in catalog.MODELS if m.get("category") == "Ultra Small"
+        }
+        self.assertEqual(
+            gpu_fallback, catalog_ultra_small | {_BENCH_QUICK_FALLBACK_IMAGE_GEN_ID}
+        )
+
+        # The pinned ID must match the v2026.06.01.6 skus.json baseline
+        # so behavior is identical with or without skus.json.
+        self.assertEqual(_BENCH_QUICK_FALLBACK_IMAGE_GEN_ID, "realistic-vision-v6")
+
+    def test_extended_on_this_device_keeps_legacy_fit_everything_behavior(self):
+        # v2026.06.01.8 deliberately scoped the fix to Quick — Extended
+        # on This Device keeps the "everything that fits is default-
+        # ticked" behavior because there is no per-SKU verified-passer
+        # set to defer to when skus.json is absent, and Extended is the
+        # right run mode for "run every model my hardware can handle".
+        app = self._make_app(run_mode="extended")
+        capacity = self._capacity(has_gpu=False)
+        small_chat = {
+            "id": "non-baseline-small",
+            "name": "Non Baseline Small",
+            "category": "Small",
+            "ollama_tag": "small:latest",
+            "min_ram_gb": 4,
+            "min_vram_gb": 0,
+        }
+        self.assertTrue(
+            app._bench_default_selected_for_model(small_chat, capacity),
+            "Extended on This Device must keep the legacy "
+            "'everything that fits is default-ticked' behavior. "
+            "Only Quick is restricted to the lean baseline.",
+        )
+
+    def test_quick_fallback_constant_matches_skus_json_baseline_when_present(self):
+        # Defense-in-depth: when skus.json IS shipped (maintainer
+        # builds), the in-code Quick fallback must mirror its declared
+        # quick_chat_ultra_small / quick_image_smallest baselines so
+        # both paths produce the same set. Skip when skus.json is not
+        # present (normal in the shipped public clone).
+        import json
+        from src.app import (
+            _bench_quick_fallback_model_ids, _BENCH_QUICK_FALLBACK_IMAGE_GEN_ID,
+        )
+
+        skus_path = ROOT / "skus.json"
+        if not skus_path.exists():
+            self.skipTest("skus.json not present (normal in public clone)")
+        baselines = (
+            json.loads(skus_path.read_text(encoding="utf-8"))
+            .get("bench_defaults", {})
+            .get("baselines", {})
+        )
+        expected_chat = set(baselines.get("quick_chat_ultra_small", []))
+        expected_image = list(baselines.get("quick_image_smallest", []))
+        cpu_fallback = _bench_quick_fallback_model_ids(has_gpu=False)
+        gpu_fallback = _bench_quick_fallback_model_ids(has_gpu=True)
+        self.assertEqual(
+            cpu_fallback, expected_chat,
+            "Quick CPU fallback must match skus.json quick_chat_ultra_small "
+            "exactly so behavior is identical with or without skus.json.",
+        )
+        self.assertEqual(
+            gpu_fallback - cpu_fallback, set(expected_image),
+            "Quick GPU fallback must add exactly the skus.json "
+            "quick_image_smallest baseline on top of the chat baseline.",
+        )
+        self.assertEqual(
+            [_BENCH_QUICK_FALLBACK_IMAGE_GEN_ID], expected_image,
+            "The in-code image-gen fallback constant must equal the "
+            "skus.json quick_image_smallest list.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

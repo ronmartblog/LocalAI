@@ -247,7 +247,7 @@ except ImportError:
     PIL_AVAILABLE = False
 
 APP_TITLE = "LocalAI Studio"
-APP_VERSION = "2026.06.01.7"
+APP_VERSION = "2026.06.01.8"
 
 CHAT_RESPONSE_TOKEN_MAX = 131072
 CHAT_RESPONSE_TOKEN_ONNX_FALLBACK = 4096
@@ -275,6 +275,50 @@ _TIMING_MAX_SAMPLES = 8   # per-model history depth
 # the resolved sets via ``App._bench_default_models_for(profile, run_mode)``.
 # DO NOT reintroduce SKU display names as hardcoded constants in any
 # file under ``src/`` — see docs/architecture.md §5 (SKU profiles).
+
+# v2026.06.01.8 Quick-mode fallback baseline (Ron, 2026-06-01):
+# Used ONLY when ``_bench_default_selected_for_model`` is evaluated against
+# the synthetic ``"This Device"`` profile — that profile is the sole entry
+# in the SKU dropdown when ``skus.json`` is not present (or, with
+# ``skus.json`` loaded, the catch-all entry the user can manually pick).
+# Without these constants the Quick fallback path returned True for every
+# model that passed the fit gate, which on a workstation-class GPU
+# silently auto-ticked 40+ rows and turned Quick into the slow "everything"
+# run. The two sets mirror the named baselines in ``skus.json``
+# (``quick_chat_ultra_small`` / ``quick_image_smallest``) so behavior is
+# identical whether or not ``skus.json`` ships with the install — when a
+# SKU profile IS loaded and selected, the per-SKU ``bench_quick_models``
+# resolved from ``skus.json`` takes precedence and these constants are
+# never consulted. ``quick_chat_ultra_small`` is derived from the catalog
+# at call time (every model with ``category == "Ultra Small"`` in
+# ``src/catalog.py``) so adding or removing an Ultra Small chat model
+# flows through automatically — matching the
+# ``tests/test_skus.py::QuickChatUltraSmallBaselineContractTests``
+# contract. The image-gen fallback is pinned to ``realistic-vision-v6``
+# (4 GB VRAM, only smallest image-gen with no benchmark_skip_reason) to
+# match ``test_quick_image_smallest_baseline_is_single_smallest_image_model``.
+_BENCH_QUICK_FALLBACK_IMAGE_GEN_ID = "realistic-vision-v6"
+
+
+def _bench_quick_fallback_model_ids(*, has_gpu: bool) -> set[str]:
+    """Return the Quick-mode default-tick model ids for the synthetic
+    ``"This Device"`` profile (no ``skus.json`` loaded, or the user
+    manually selected ``"This Device"`` from a populated SKU dropdown).
+    Always includes the catalog's ``Ultra Small`` chat models; adds the
+    single ``quick_image_smallest`` image-gen model when ``has_gpu`` is
+    True. Image-gen rows are gated by the same ``has_gpu`` rule that
+    ``_bench_default_selected_for_model`` enforces earlier in the
+    pipeline.
+    """
+    ids = {
+        str(m.get("id"))
+        for m in catalog.MODELS
+        if m.get("category") == "Ultra Small"
+    }
+    if has_gpu:
+        ids.add(_BENCH_QUICK_FALLBACK_IMAGE_GEN_ID)
+    return ids
+
 
 # v5.5.14 img2img prompt defaults (Ron, 2026-05-29): when the user checks
 # "Use reference image for generation" on the Image Gen page we auto-load
@@ -5983,13 +6027,33 @@ class App(ctk.CTk):
             except Exception:
                 model_local = False
             if not model_local:
-                messagebox.showinfo(
-                    "Model not pulled",
-                    f"The Ollama model '{ollama_tag}' isn't on this machine yet. "
-                    "Open the Models tab, find it, and click Download. "
-                    "Then come back and run this workflow.",
-                    parent=self,
+                # v2026.06.01.8 (Ron, 2026-06-01): the legacy "Open the
+                # Models tab" hint sent users on a hunt for vision
+                # models (minicpm-v / gemma3-vision) that they actually
+                # install most naturally from Image Gen > Vision picker
+                # — and routing through one extra page is unnecessary
+                # when we already have the catalog dict in hand and a
+                # tested in-app downloader. Offer to download right
+                # here instead. This works for every Ollama-backed
+                # Toolbox workflow (extract table fast, etc.).
+                model_name = entry.get("name") or ollama_tag
+                size_gb = entry.get("size_gb") or 0
+                size_hint = (
+                    f"\n\nDownload size: ~{size_gb:.1f} GB."
+                    if size_gb else ""
                 )
+                if messagebox.askyesno(
+                    "Download model now?",
+                    f"This workflow needs the Ollama model '{model_name}'.\n"
+                    "It is not on this machine yet."
+                    f"{size_hint}\n\n"
+                    "Download it now? The Toolbox workflow will not "
+                    "start until the download finishes — re-run this "
+                    "workflow once the status shows the download is "
+                    "complete.",
+                    parent=self,
+                ):
+                    self.start_download(entry)
                 return
         input_text = ""
         input_path = None
@@ -7453,6 +7517,25 @@ class App(ctk.CTk):
             return False
 
         if not capacity.get("is_sku") or profile == "This Device":
+            # v2026.06.01.8 Quick-mode fallback fix (Ron, 2026-06-01).
+            # The synthetic "This Device" profile is the only entry in
+            # the SKU dropdown when skus.json is absent — and ``is_sku``
+            # is False in that mode. Returning True for every fitting
+            # model on Quick auto-ticks 40+ rows on a capable GPU and
+            # silently breaks the "Quick is a sub-3-minute smoke set"
+            # contract. Quick now restricts to the lean fallback
+            # baseline that mirrors the skus.json ``quick_chat_ultra_small``
+            # + ``quick_image_smallest`` sets, so Quick behaves the same
+            # whether or not skus.json is loaded. Extended on This Device
+            # keeps the legacy "everything that fits is default-ticked"
+            # behavior — there is no per-SKU verified-passer set to
+            # defer to without skus.json, and Extended is the right
+            # place for "run every model my hardware can handle".
+            if run_mode == "quick":
+                fallback_ids = _bench_quick_fallback_model_ids(
+                    has_gpu=bool(capacity.get("has_gpu"))
+                )
+                return str(model.get("id") or "") in fallback_ids
             return True
         if observed_profile_has_data:
             # Per Ron 2026-05-24 recalibration: a SKU with verified
@@ -15737,6 +15820,22 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
         self._img_vision_help_lbl.grid(row=4, column=0, sticky="w", pady=(0, 12))
 
         # ── Analyze CTA ─────────────────────────────────────────────────
+        # v2026.06.01.8 state-machine layout (Ron, 2026-06-01):
+        # Exactly ONE primary action is visible at a time, chosen by
+        # ``_refresh_vision_model_ui`` based on the selected vision
+        # model's install state and any in-flight operation.
+        # Visible button → state:
+        #   Download                → selected model is not installed
+        #   Stop ("Cancel download") → selected model is currently being pulled
+        #   Analyze → Prompt          → selected model is installed and idle
+        #   Stop                      → an analyze is running
+        # The legacy three-button row caused the "Analyze → Promp" /
+        # "nalyze → Prompt" clipping in the screenshot Ron flagged
+        # because the row was sized for one button at a time but always
+        # rendered all three. Now that only one is visible at a time
+        # the surviving button gets full width via column 0 weight and
+        # the clip is gone by construction. The single column also lets
+        # us drop the per-button left/right padding tricks.
         analyze_row = ctk.CTkFrame(body, fg_color="transparent")
         analyze_row.grid(row=5, column=0, sticky="ew", pady=(2, 6))
         analyze_row.grid_columnconfigure(0, weight=1)
@@ -15748,26 +15847,32 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
             **self._solid_button_style(self._IG_ACCENT, self._IG_ACCENT_HOVER, self._IG_ACCENT_TEXT),
             command=self._analyze_reference_image,
         )
-        self._img_analyze_btn.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self._img_analyze_btn.grid(row=0, column=0, sticky="ew")
 
         self._img_analyze_get_model_btn = ctk.CTkButton(
-            analyze_row, text="⬇ Download", width=112, height=40,
-            font=ctk.CTkFont(size=12, weight="bold"),
+            analyze_row, text="⬇ Download", height=40,
+            font=ctk.CTkFont(size=13, weight="bold"),
             **self._solid_button_style(self._IG_ACCENT, self._IG_ACCENT_HOVER, self._IG_ACCENT_TEXT),
             command=self._download_vision_model,
         )
-        # Shown only when the selected vision model isn't installed
-        self._img_analyze_get_model_btn.grid(row=0, column=1, sticky="e")
+        # Hidden by default; ``_refresh_vision_model_ui`` shows it when
+        # the selected vision model is not installed locally.
+        self._img_analyze_get_model_btn.grid(row=0, column=0, sticky="ew")
         self._img_analyze_get_model_btn.grid_remove()
 
+        # The Stop button does double duty: cancels an in-flight
+        # vision-model pull when one is running, otherwise cancels an
+        # in-flight Analyze → Prompt. ``_stop_vision_action`` dispatches
+        # so the button only needs one command binding.
         self._img_analyze_stop_btn = ctk.CTkButton(
-            analyze_row, text="■ Stop", width=88, height=40,
+            analyze_row, text="■ Stop", height=40,
             state="disabled",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=ctk.CTkFont(size=13, weight="bold"),
             **self._solid_button_style(self._IG_DANGER, "#8a2424", self._IG_DANGER_TEXT),
-            command=self._stop_analyze,
+            command=self._stop_vision_action,
         )
-        self._img_analyze_stop_btn.grid(row=0, column=2, sticky="e", padx=(8, 0))
+        self._img_analyze_stop_btn.grid(row=0, column=0, sticky="ew")
+        self._img_analyze_stop_btn.grid_remove()
 
         return card
 
@@ -16188,23 +16293,142 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
         "Output ONLY a comma-separated list of tags — no sentences, no explanation."
     )
 
+    def _is_vision_model_downloading(self, vision_tag: str) -> bool:
+        """Return True when the currently-selected vision model is the
+        target of an in-flight Ollama pull. Used by
+        ``_refresh_vision_model_ui`` to switch the analyze-row state
+        machine to the "downloading" state.
+        """
+        thread = getattr(self, "_download_thread", None)
+        if thread is None or not thread.is_alive():
+            return False
+        active = getattr(self, "_active_download_tag", "") or ""
+        return bool(vision_tag) and active == vision_tag
+
+    def _is_vision_analyze_running(self) -> bool:
+        """Return True when an Analyze → Prompt worker is in flight and
+        has not been signaled to stop. Used by the vision-row state
+        machine to choose between Analyze and Stop.
+        """
+        thread = getattr(self, "_analyze_thread", None)
+        if thread is None or not thread.is_alive():
+            return False
+        stop_event = getattr(self, "_analyze_stop_event", None)
+        if stop_event is not None and stop_event.is_set():
+            return False
+        return True
+
+    def _stop_vision_action(self):
+        """Single dispatcher behind the analyze-row Stop button. Cancels
+        whichever vision-side operation is currently in flight for the
+        selected model:
+          * Ollama pull → set the shared download stop_event so
+            ``OllamaClient.pull_model`` aborts cleanly.
+          * Analyze → Prompt → delegate to ``_stop_analyze`` (which sets
+            the analyze stop_event and reflects the disabled state on
+            the button).
+        Falling through with neither operation active is a no-op — the
+        button is hidden in that state, so reaching here would only
+        happen via a keyboard shortcut on a stale handle.
+        """
+        vision_tag = self._get_selected_vision_tag()
+        if self._is_vision_model_downloading(vision_tag):
+            try:
+                self._stop_event.set()
+            except Exception as exc:
+                logger.debug(f"Vision Stop: failed to signal download stop event: {exc}")
+            self._img_analyze_stop_btn.configure(
+                state="disabled",
+                fg_color=self._IG_DISABLED_FG,
+                text_color_disabled=self._IG_DISABLED_TEXT,
+            )
+            try:
+                self.set_status(f"Cancelling download of {vision_tag} …")
+            except Exception:
+                pass
+            logger.info(
+                f"Vision picker: cancel download requested for {vision_tag}"
+            )
+            return
+        if self._is_vision_analyze_running():
+            self._stop_analyze()
+            return
+        logger.debug("Vision Stop pressed with no active operation; ignored.")
+
     def _refresh_vision_model_ui(self):
-        """Update the Analyze→Prompt button and Get Model button based on the
-        currently selected vision model's availability."""
-        # v5.1: also refresh the vision picker so installed pills repaint
-        # whenever this is called (download finished, ollama just came up, etc).
+        """Update the analyze-row state machine for the selected vision
+        model. Exactly ONE of the three buttons is visible at a time:
+
+          * Analyze running → [Stop] only
+          * Download running for the selected tag → [Stop] only
+          * Selected model not installed → [Download] only
+          * Selected model installed (idle) → [Analyze → Prompt] only
+
+        v2026.06.01.8 (Ron, 2026-06-01): replaces the legacy
+        always-three-buttons layout. The legacy layout caused the
+        "Analyze → Promp" clipping seen on narrower vision panels
+        because all three buttons fought for the same row width, and
+        showed an enabled Analyze button even when the selected model
+        was not installed.
+        """
+        # Repaint vision picker cards first so the installed pills
+        # match whatever just changed (download finished, ollama just
+        # came up, selection changed, etc.).
         try:
             self._refresh_vision_picker_ui()
         except Exception:
             pass
+        if not hasattr(self, "_img_analyze_btn"):
+            return
+
         vision_tag = self._get_selected_vision_tag()
         try:
             has_model = self.ollama_ok and self.ollama.is_model_local(vision_tag)
         except Exception:
             has_model = False
-        if not hasattr(self, "_img_analyze_btn"):
+        downloading = self._is_vision_model_downloading(vision_tag)
+        analyzing = self._is_vision_analyze_running()
+
+        def _show_only(widget):
+            """Hide the other two analyze-row buttons and show this one."""
+            for btn in (
+                self._img_analyze_btn,
+                self._img_analyze_get_model_btn,
+                self._img_analyze_stop_btn,
+            ):
+                if btn is widget:
+                    btn.grid()
+                else:
+                    btn.grid_remove()
+
+        if analyzing:
+            _show_only(self._img_analyze_stop_btn)
+            self._img_analyze_stop_btn.configure(
+                text="■ Stop",
+                state="normal",
+                fg_color=self._IG_DANGER,
+                hover_color="#8a2424",
+                text_color=self._IG_DANGER_TEXT,
+            )
+            return
+        if downloading:
+            _show_only(self._img_analyze_stop_btn)
+            self._img_analyze_stop_btn.configure(
+                text="■ Cancel download",
+                state="normal",
+                fg_color=self._IG_DANGER,
+                hover_color="#8a2424",
+                text_color=self._IG_DANGER_TEXT,
+            )
+            if hasattr(self, "_img_analyze_status"):
+                entry = self._get_selected_vision_entry()
+                display_name = (entry or {}).get("name") or vision_tag
+                self._img_set_canvas_status(
+                    f"Downloading {display_name} …", TEXT_MUTED
+                )
             return
         if has_model:
+            _show_only(self._img_analyze_btn)
             self._img_analyze_btn.configure(
                 state="normal",
                 fg_color=self._IG_ACCENT,
@@ -16213,26 +16437,16 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
             )
             if hasattr(self, "_img_analyze_status"):
                 self._img_set_canvas_status("")
-            if hasattr(self, "_img_analyze_get_model_btn"):
-                self._img_analyze_get_model_btn.grid_remove()
-        else:
-            self._img_analyze_btn.configure(
-                state="normal",
-                fg_color=self._IG_ACCENT,
-                hover_color=self._IG_ACCENT_HOVER,
-                text_color=self._IG_ACCENT_TEXT,
-            )
-            display_name = vision_tag
+            return
+        # Selected vision model is not installed locally.
+        _show_only(self._img_analyze_get_model_btn)
+        if hasattr(self, "_img_analyze_status"):
             entry = self._get_selected_vision_entry()
-            if entry:
-                display_name = entry.get("name") or vision_tag
-            if hasattr(self, "_img_analyze_status"):
-                self._img_set_canvas_status(
-                    f"{display_name} not installed — click Download to get it",
-                    WARN_TEXT,
-                )
-            if hasattr(self, "_img_analyze_get_model_btn"):
-                self._img_analyze_get_model_btn.grid()
+            display_name = (entry or {}).get("name") or vision_tag
+            self._img_set_canvas_status(
+                f"{display_name} not installed — click Download to get it",
+                WARN_TEXT,
+            )
 
     def _browse_reference_image(self):
         from tkinter import filedialog
@@ -16280,7 +16494,17 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
             )
             return
         logger.info(f"_download_vision_model: queuing download for {vision_tag}")
-        self.start_download(model_dict)
+        started = self.start_download(model_dict)
+        # v2026.06.01.8: flip the analyze-row from Download → Cancel
+        # download immediately so the user sees the new state without
+        # waiting for the next paint tick. If start_download bailed
+        # early (e.g. user declined a resource warning), the refresh
+        # sees no live download and leaves the Download button up.
+        if started:
+            try:
+                self._refresh_vision_model_ui()
+            except Exception as exc:
+                logger.debug(f"Vision picker refresh after start_download failed: {exc}")
 
     def _analyze_reference_image(self):
         if not self._img_ref_path:
@@ -16555,6 +16779,15 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
 
         self._analyze_thread = threading.Thread(target=_worker, daemon=True)
         self._analyze_thread.start()
+        # v2026.06.01.8: now that the thread is alive, refresh the
+        # vision picker UI so the state machine flips the analyze-row
+        # to the Stop button. The direct ``configure(state="disabled")``
+        # calls above keep the button-state-based ``_analyze_tick_elapsed``
+        # gating intact (it reads ``_img_analyze_btn.cget("state")``).
+        try:
+            self._refresh_vision_model_ui()
+        except Exception as exc:
+            logger.debug(f"Vision picker refresh on analyze start failed: {exc}")
 
     def _stop_analyze(self):
         """User clicked Stop — signal the worker thread to abort."""
@@ -18615,24 +18848,48 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
                 return
             # If the downloaded model is any of the selectable vision models or the
             # legacy llama vision tag, refresh the vision picker + analyze CTAs.
-            vision_tags = {self.LEGACY_VISION_MODEL}
-            vision_tags.update(
-                e.get("ollama_tag", "")
-                for e in (self._vision_picker_entries() if hasattr(self, "_vision_picker_entries") else [])
-                if e.get("ollama_tag")
-            )
-            if model.get("ollama_tag") in vision_tags:
-                try:
-                    self._refresh_vision_picker_ui()
-                except Exception:
-                    pass
-                self._refresh_vision_model_ui()
+            try:
+                vision_tags = {self.LEGACY_VISION_MODEL}
+                vision_tags.update(
+                    e.get("ollama_tag", "")
+                    for e in (self._vision_picker_entries() if hasattr(self, "_vision_picker_entries") else [])
+                    if e.get("ollama_tag")
+                )
+                if model.get("ollama_tag") in vision_tags:
+                    try:
+                        self._refresh_vision_picker_ui()
+                    except Exception:
+                        pass
+                    try:
+                        self._refresh_vision_model_ui()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         else:
             self.set_status(f"Download failed: {error}")
             logger.error(f"Download failed for {model['ollama_tag']}: {error}", category=logger.CATEGORY_MODEL_PULL)
             pending = getattr(self, "_pending_chat_load_after_download", None)
             if pending and pending.get("model_id") == model.get("id"):
                 self._pending_chat_load_after_download = None
+            # v2026.06.01.8: even on failure, the vision picker needs to
+            # revert from "Cancel download" back to "Download" if the
+            # failed model is a vision-picker entry — otherwise the
+            # Stop button would stay visible after the failure dialog.
+            try:
+                vision_tags_fail = {self.LEGACY_VISION_MODEL}
+                vision_tags_fail.update(
+                    e.get("ollama_tag", "")
+                    for e in (self._vision_picker_entries() if hasattr(self, "_vision_picker_entries") else [])
+                    if e.get("ollama_tag")
+                )
+                if model.get("ollama_tag") in vision_tags_fail:
+                    try:
+                        self._refresh_vision_model_ui()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             messagebox.showerror("Download failed", error, parent=self)
 
     def _show_progress(self, show: bool):

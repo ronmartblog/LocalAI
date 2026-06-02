@@ -601,6 +601,10 @@ if not errorlevel 1 (
 echo [*] Installing NVIDIA CUDA PyTorch image packages ...
 echo     This downloads large CUDA wheels and can take several minutes.
 echo     Progress will be shown below; do not close this window.
+echo     Note: the NVIDIA cu128 channel currently ships PyTorch 2.11.0;
+echo     if a newer PyTorch is already installed from another channel
+echo     ^(e.g. torch-directml 2.12.0^) pip will replace it with the cu128
+echo     wheel. That replacement is expected and required for CUDA.
 "%PYTHON_EXE%" -m pip uninstall -y torch torchvision torchaudio torch-directml
 echo.
 :: --no-cache-dir was needed pre-v5.3.10 because pip cachecontrol spooled the

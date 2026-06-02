@@ -73,8 +73,8 @@ badges, per-SKU benchmark presets) hide gracefully when no
 `skus.json` is present.
 
 The expected schema is documented inline as `_readme` in the loader
-(`src/system_info.py`). A working example `skus.json` (with Windows 365
-Cloud PC entries the author uses for testing) plus an illustrative
+(`src/system_info.py`). A working example `skus.json` (with the cloud-VM
+SKU entries the author uses for testing) plus an illustrative
 `Model-Guide.html` rendered from author benchmark runs live in
 [`samples/`](samples/) — see [`samples/readme.txt`](samples/readme.txt)
 for how to copy them into your install. The sample SKUs are reference
