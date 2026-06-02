@@ -5436,5 +5436,131 @@ class BenchmarkQuickFallbackContractTests(unittest.TestCase):
         )
 
 
+class ComfyUIInstallResolverContractTests(unittest.TestCase):
+    """v2026.06.01.9 — pin the multi-location ComfyUI install resolver so
+    a fresh app extraction on top of an existing install (the v.N+1
+    upgrade-in-place pattern) still finds the sibling-of-app ComfyUI
+    that ``setup.bat`` itself searches for at line ~388
+    (``%~dp0..\\ComfyUI``). Prior to v.9 the resolver only checked the
+    child location (``<app>/ComfyUI``) so the Image Gen tab and
+    benchmark both reported "ComfyUI not installed at expected paths"
+    for a working install."""
+
+    def _function_source(self, name: str, module_text: str) -> str:
+        tree = ast.parse(module_text)
+        lines = module_text.splitlines()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return "\n".join(lines[node.lineno - 1: node.end_lineno])
+        self.fail(f"{name} not found in module text")
+
+    def test_app_comfyui_installed_path_checks_sibling_of_app(self):
+        src = self._function_source("_comfyui_installed_path", APP_TEXT)
+        # The sibling fallback must walk three .parent hops from app.py
+        # (src/app.py → src → app root → sibling-of-app) and probe ComfyUI/main.py.
+        self.assertIn("Path(__file__).parent.parent.parent", src,
+                      "_comfyui_installed_path must compute the sibling-of-app "
+                      "candidate (three .parent hops from src/app.py).")
+        self.assertIn('"ComfyUI"', src)
+        # The fallback must self-heal: persist the discovered path so subsequent
+        # restarts don't re-do the probe.
+        self.assertIn('self.cfg["comfyui_dir"]', src)
+        self.assertIn("config.save", src)
+        self.assertIn("_sync_comfyui_path_bat", src)
+
+    def test_config_load_uses_sibling_resolver_helper(self):
+        config_text = (ROOT / "src" / "config.py").read_text(encoding="utf-8")
+        # Helpers must exist.
+        self.assertIn("def _candidate_comfyui_install_dirs(", config_text)
+        self.assertIn("def _resolve_existing_comfyui_install(", config_text)
+        # load() must consult the resolver, not just default to <app>/ComfyUI.
+        load_src = self._function_source("load", config_text)
+        self.assertIn("_resolve_existing_comfyui_install", load_src,
+                      "config.load() must consult _resolve_existing_comfyui_install "
+                      "so empty / missing comfyui_dir auto-heals to the sibling-of-app "
+                      "location that setup.bat also searches.")
+
+    def test_candidate_comfyui_install_dirs_returns_child_then_sibling(self):
+        """The candidate order must match setup.bat's own lookup at lines
+        ~381 + ~388: child (``<app>/ComfyUI``) first, sibling
+        (``<app>/../ComfyUI``) second. Order matters because a fresh
+        install creates the child first."""
+        from src.config import _candidate_comfyui_install_dirs
+        app_root = Path("C:/example_app")
+        cands = _candidate_comfyui_install_dirs(app_root)
+        self.assertEqual(
+            [str(p).replace("\\", "/") for p in cands],
+            ["C:/example_app/ComfyUI", "C:/ComfyUI"],
+        )
+
+
+class ImageGenAutoPullContractTests(unittest.TestCase):
+    """v2026.06.01.9 — pin the Image Gen tab silent auto-pull contract so
+    downloadable catalog image-gen models can be picked from the
+    dropdown and silently downloaded on Generate, matching the Ollama
+    chat-model UX."""
+
+    def _function_source(self, name: str) -> str:
+        tree = ast.parse(APP_TEXT)
+        lines = APP_TEXT.splitlines()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return "\n".join(lines[node.lineno - 1: node.end_lineno])
+        self.fail(f"{name} not found")
+
+    def test_populate_image_model_menu_unions_downloadable_catalog_entries(self):
+        """The dropdown must include downloadable catalog image-gen
+        models even when their checkpoint isn't on disk yet — otherwise
+        a fresh install shows '(no checkpoints found)' and Generate
+        refuses, forcing users to use the Benchmark tab to bootstrap."""
+        src = self._function_source("_populate_image_model_menu")
+        self.assertIn("_catalog_image_model_filenames_with_url", src,
+                      "_populate_image_model_menu must union on-disk models "
+                      "with downloadable catalog image-gen entries.")
+        # The helper itself must exist and filter on category + URL.
+        helper = self._function_source("_catalog_image_model_filenames_with_url")
+        self.assertIn('"Image Generation"', helper)
+        self.assertIn("comfyui_model_url", helper)
+        self.assertIn("comfyui_model", helper)
+
+    def test_start_image_generation_calls_ensure_checkpoint_present(self):
+        """Generate must call the auto-pull helper before kicking off the
+        ComfyUI workflow so a downloadable catalog model that isn't on
+        disk gets pulled silently instead of failing with a vague
+        ComfyUI-side error."""
+        src = self._function_source("_start_image_generation")
+        self.assertIn("_ensure_selected_image_checkpoint_present", src,
+                      "_start_image_generation must invoke "
+                      "_ensure_selected_image_checkpoint_present before "
+                      "queueing the ComfyUI workflow.")
+        # Must also gate re-entry while a download is in flight so a
+        # double-click on Generate doesn't kick off a second download.
+        self.assertIn("_img_checkpoint_download_in_progress", src)
+
+    def test_download_image_checkpoint_async_reuses_bench_helper(self):
+        """The auto-pull worker must reuse ``_bench_prepare_image_model``
+        — the same helper the Benchmark tab uses — so both surfaces
+        share validation, disk-space checks, and runtime-support prep."""
+        src = self._function_source("_download_image_checkpoint_async")
+        self.assertIn("_bench_prepare_image_model", src)
+        self.assertIn("threading.Thread", src)
+        # On completion it must re-enter Generate so the user doesn't
+        # have to click the button a second time.
+        completion_src = self._function_source("_image_checkpoint_downloaded")
+        self.assertIn("_start_image_generation", completion_src)
+
+    def test_ensure_selected_image_checkpoint_present_is_silent(self):
+        """The 'silent' part of silent auto-pull: the helper must not
+        show a messagebox / askyesno prompt. The Benchmark tab already
+        prompts up front; the Image Gen tab matches the chat tab UX
+        where Ollama models pull silently on first use."""
+        src = self._function_source("_ensure_selected_image_checkpoint_present")
+        self.assertNotIn("messagebox.show", src)
+        self.assertNotIn("askyesno", src)
+        # Must check on-disk before kicking off a download.
+        self.assertIn("_comfyui_model_download_target", src)
+        self.assertIn(".exists()", src)
+
+
 if __name__ == "__main__":
     unittest.main()

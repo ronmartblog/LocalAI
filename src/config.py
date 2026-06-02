@@ -7,6 +7,7 @@ import json
 import os
 import sys  # noqa: F401  (kept for backward import compatibility)
 from pathlib import Path
+from typing import Optional
 
 from src import logger as _log
 from src.persistence import atomic_write_json
@@ -148,6 +149,33 @@ def _is_legacy_profile_comfyui_dir(path: Path) -> bool:
 def _has_comfyui_install(path: Path) -> bool:
     return (path / "main.py").is_file()
 
+
+def _candidate_comfyui_install_dirs(app_root: Path) -> list[Path]:
+    """Return the ordered list of locations where ComfyUI may live next
+    to a LocalAI app install. Matches the lookup order in ``setup.bat`` so
+    a setup that picked the sibling location is honored even when the
+    user has not re-run setup inside the current app tree (which is the
+    common case when v.N+1 is unzipped on top of a v.N install: the
+    fresh app dir has no ``config.json`` / ``comfyui_path.bat`` yet, but
+    the old sibling ComfyUI is still on disk and fully usable).
+
+    Order:
+      1. ``<app_root>/ComfyUI``   (default install — child of app)
+      2. ``<app_root>/../ComfyUI`` (sibling — matches ``%~dp0..\\ComfyUI``
+                                    fallback in ``setup.bat``)
+    """
+    return [app_root / "ComfyUI", app_root.parent / "ComfyUI"]
+
+
+def _resolve_existing_comfyui_install(app_root: Path) -> Optional[Path]:
+    """Return the first existing ComfyUI install in the standard
+    next-to-the-app search order, or ``None`` if neither candidate
+    contains ``main.py``."""
+    for candidate in _candidate_comfyui_install_dirs(app_root):
+        if _has_comfyui_install(candidate):
+            return candidate
+    return None
+
 DEFAULT_CONFIG = {
     "ollama_host": "http://localhost:11434",
     "models_dir": "",          # filled in at first run as <app_path>/models
@@ -288,17 +316,29 @@ def load() -> dict:
     # Set/default-repair ComfyUI dir to <app_path>/ComfyUI (next to the app).
     # Older v5.3.x setup builds wrote %LOCALAPPDATA%/Application Support paths;
     # on cloud VMs those profile paths are often missing or size-capped.
-    default_comfyui_dir = _default_data_dir() / "ComfyUI"
+    #
+    # v2026.06.01.9: when ``comfyui_dir`` is empty (e.g. a fresh app
+    # extraction on top of an older install where setup.bat was never re-run
+    # in the new tree), also probe the sibling location
+    # (``<app_path>/../ComfyUI``) that ``setup.bat`` itself falls back to.
+    # Without this, the resolver returns the child default path even when
+    # ComfyUI is sitting one folder above the app, and the benchmark / image
+    # gen tab report "ComfyUI not installed at expected paths" for a working
+    # install.
+    app_root = _default_data_dir()
+    default_comfyui_dir = app_root / "ComfyUI"
     comfyui_dir_value = str(cfg.get("comfyui_dir") or "").strip()
     if not comfyui_dir_value:
-        cfg["comfyui_dir"] = str(default_comfyui_dir)
+        resolved = _resolve_existing_comfyui_install(app_root)
+        cfg["comfyui_dir"] = str(resolved if resolved is not None else default_comfyui_dir)
     else:
         comfyui_path = Path(comfyui_dir_value)
-        default_has_install = _has_comfyui_install(default_comfyui_dir)
         configured_missing = not _has_comfyui_install(comfyui_path)
         configured_is_legacy_profile = _is_legacy_profile_comfyui_dir(comfyui_path)
-        if default_has_install and (configured_missing or configured_is_legacy_profile):
-            cfg["comfyui_dir"] = str(default_comfyui_dir)
+        if configured_missing or configured_is_legacy_profile:
+            resolved = _resolve_existing_comfyui_install(app_root)
+            if resolved is not None:
+                cfg["comfyui_dir"] = str(resolved)
     if loaded_ok and saved_payload is not None:
         missing_default_key = any(key not in saved_payload for key in DEFAULT_CONFIG)
         if (

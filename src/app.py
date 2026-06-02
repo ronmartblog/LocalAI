@@ -247,7 +247,7 @@ except ImportError:
     PIL_AVAILABLE = False
 
 APP_TITLE = "LocalAI Studio"
-APP_VERSION = "2026.06.01.8"
+APP_VERSION = "2026.06.01.9"
 
 CHAT_RESPONSE_TOKEN_MAX = 131072
 CHAT_RESPONSE_TOKEN_ONNX_FALLBACK = 4096
@@ -13442,6 +13442,22 @@ class App(ctk.CTk):
                 self._sync_comfyui_path_bat(old_path)
             return old_path
 
+        # 4. v2026.06.01.9: sibling-of-app fallback. ``setup.bat`` line ~388
+        # (``%~dp0..\\ComfyUI``) installs ComfyUI here when an earlier app
+        # tree was discovered next door. When v.N+1 is unzipped on top of
+        # v.N the new app dir has no ``config.json`` or ``comfyui_path.bat``
+        # yet, but the sibling ComfyUI is fully functional. Without this
+        # fallback the benchmark and Image Gen tab both report "ComfyUI not
+        # installed at expected paths" for a working install — fix is to
+        # match setup.bat's own search order.
+        sibling_path = Path(__file__).parent.parent.parent / "ComfyUI"
+        if (sibling_path / "main.py").exists():
+            self.cfg["comfyui_dir"] = str(sibling_path)
+            if not config.save(self.cfg):
+                logger.error("Could not persist repaired ComfyUI path")
+            self._sync_comfyui_path_bat(sibling_path)
+            return sibling_path
+
         return None
 
     def _check_comfyui_async(self):
@@ -14061,6 +14077,110 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
             return
         self._img_set_status("Image model support ready. Starting generation ...", color=SUCCESS_TEXT)
         logger.info("Image model support ready; starting queued generation", category=logger.CATEGORY_IMAGE_GEN)
+        self.after(100, self._start_image_generation)
+
+    def _ensure_selected_image_checkpoint_present(self, model_filename: str) -> Optional[bool]:
+        """Silently auto-download a missing Image Gen checkpoint, mirroring
+        the chat-model UX where Ollama models auto-pull on first use.
+
+        Returns:
+            None  — nothing to do (file present, no catalog entry, or no URL),
+                    caller should continue with generation as normal.
+            True  — download started in the background; caller MUST return and
+                    let ``_image_checkpoint_downloaded`` re-enter Generate.
+            False — caught a permanent error (caller has already surfaced the
+                    error message and reset the button state) and should return.
+
+        v2026.06.01.9: previously a user could pick a downloadable catalog
+        model in the dropdown and click Generate, only to fail with a
+        ComfyUI-side "model not found" error and no recovery path inside the
+        app. The Benchmark tab already auto-pulls via
+        ``_bench_prepare_image_model`` — this method reuses the same helper
+        from the Image Gen tab so both surfaces behave the same.
+        """
+        if not model_filename:
+            return None
+        entry = self._find_catalog_entry_for_model(model_filename)
+        if not entry or not entry.get("comfyui_model_url"):
+            return None
+        comfyui_path = self._comfyui_installed_path()
+        if not comfyui_path:
+            return None
+        try:
+            target_path = self._comfyui_model_download_target(entry, comfyui_path)
+        except Exception as exc:
+            logger.debug(
+                f"Could not resolve image checkpoint target for {model_filename}: {exc}",
+                category=logger.CATEGORY_IMAGE_GEN,
+            )
+            return None
+        if target_path.exists():
+            return None
+        self._download_image_checkpoint_async(entry)
+        return True
+
+    def _download_image_checkpoint_async(self, model_entry: dict) -> None:
+        """Background worker that pulls a missing Image Gen checkpoint via
+        ``_bench_prepare_image_model`` (same helper the Benchmark tab uses)
+        and re-enters ``_start_image_generation`` on success.
+        """
+        self._img_checkpoint_download_in_progress = True
+        self._set_image_generate_button_running(True)
+        if hasattr(self, "_img_stop_btn"):
+            self._img_stop_btn.configure(state="disabled")
+        if hasattr(self, "_img_save_btn"):
+            self._img_save_btn.configure(state="disabled")
+        friendly = model_entry.get("name") or model_entry.get("comfyui_model") or "checkpoint"
+        size_gb = model_entry.get("size_gb")
+        size_hint = f" (~{size_gb:.1f} GB)" if isinstance(size_gb, (int, float)) and size_gb else ""
+        self._img_set_status(
+            f"Downloading {friendly}{size_hint}…",
+            color=WARN_TEXT,
+        )
+        logger.info(
+            f"Image Gen tab: auto-downloading checkpoint {model_entry.get('comfyui_model', '?')}",
+            category=logger.CATEGORY_IMAGE_GEN,
+        )
+        self._img_safe_clear_display(
+            f"Downloading {friendly}{size_hint}…\n\n"
+            "Generation will start automatically when the download completes.",
+            WARN_TEXT,
+        )
+        self._img_show_progress(mode="indeterminate", color=WARN_TEXT)
+
+        def _worker():
+            ok = False
+            err = ""
+            try:
+                ok, err = self._bench_prepare_image_model(model_entry, self._img_stop_event)
+            except Exception as exc:
+                ok = False
+                err = str(exc) or "Unknown error during image checkpoint download"
+            self.after(0, lambda: self._image_checkpoint_downloaded(ok, err))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _image_checkpoint_downloaded(self, ok: bool, err: str = "") -> None:
+        self._img_checkpoint_download_in_progress = False
+        if not ok:
+            self._set_image_generate_button_running(False)
+            self._img_stop_progress()
+            message = err or "Could not download the selected image checkpoint."
+            self._img_set_status(f"Image checkpoint download failed: {message}", color=ERROR_TEXT)
+            self._img_safe_clear_display(
+                f"Image checkpoint download failed:\n\n{message}",
+                ERROR_TEXT,
+            )
+            logger.error(
+                f"Image Gen tab auto-download failed: {message}",
+                category=logger.CATEGORY_IMAGE_GEN,
+            )
+            return
+        self._img_set_status("Checkpoint ready. Starting generation…", color=SUCCESS_TEXT)
+        logger.info(
+            "Image Gen tab: checkpoint download finished; resuming Generate",
+            category=logger.CATEGORY_IMAGE_GEN,
+        )
         self.after(100, self._start_image_generation)
 
     def _missing_comfyui_python_modules(self, python_exe: str, modules: list[str]) -> list[str]:
@@ -17431,7 +17551,45 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
                 return m.get("name") or filename
         return filename
 
+    def _catalog_image_model_filenames_with_url(self) -> list[str]:
+        """Return ComfyUI checkpoint filenames for catalog Image Generation
+        entries that have an automatic-download URL configured. Used by the
+        Image Gen dropdown so users can pick a model even before its
+        checkpoint is on disk — the file is auto-pulled on Generate.
+
+        v2026.06.01.9 (Image Gen auto-pull): previously the dropdown was
+        sourced purely from ComfyUI's on-disk checkpoint scan, which meant
+        a fresh ComfyUI install (no models pulled) showed "(no checkpoints
+        found)" and Generate refused. Now the dropdown unions on-disk
+        names with downloadable catalog entries so the user can pick any
+        curated image-gen model and have it silently downloaded on
+        Generate, matching the Ollama chat-model UX.
+        """
+        return [
+            m.get("comfyui_model") or ""
+            for m in self._catalog_models
+            if m.get("category") == "Image Generation"
+            and m.get("comfyui_model")
+            and m.get("comfyui_model_url")
+        ]
+
     def _populate_image_model_menu(self, models: list[str]) -> None:
+        # v2026.06.01.9: union the on-disk checkpoint list with downloadable
+        # catalog image-gen entries so users can pick (and silently auto-pull)
+        # a curated model even before it's been installed. The existing CPU /
+        # iGPU filters below still apply, and the existing fastest-first sort
+        # and user-checkpoint disambiguation are unchanged — a catalog model
+        # not yet on disk is treated identically to one that is. The Generate
+        # path handles the actual download (``_ensure_selected_image_model_present``).
+        catalog_downloadable = self._catalog_image_model_filenames_with_url()
+        seen_union: set[str] = set()
+        unioned: list[str] = []
+        for fn in list(models) + catalog_downloadable:
+            if not fn or fn in seen_union:
+                continue
+            seen_union.add(fn)
+            unioned.append(fn)
+        models = unioned
         if getattr(self, "_comfyui_force_cpu", False):
             cpu_files = {
                 m.get("comfyui_model")
@@ -17887,6 +18045,13 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
             self._img_set_status("Image model support is still being prepared; generation will continue automatically.", color=WARN_TEXT)
             self._set_image_generate_button_running(False)
             return
+        if getattr(self, "_img_checkpoint_download_in_progress", False):
+            self._img_set_status(
+                "Image checkpoint is still downloading; generation will continue automatically.",
+                color=WARN_TEXT,
+            )
+            self._set_image_generate_button_running(False)
+            return
         if getattr(self, "_img_waiting_for_comfyui_generation", False):
             self._img_set_status("ComfyUI is still starting; generation will continue automatically.", color=WARN_TEXT)
             self._img_show_progress(mode="indeterminate", color=WARN_TEXT)
@@ -17963,6 +18128,17 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
             )
             logger.warning(f"Negative prompt blocked (matched: {blocked_neg})", category=logger.CATEGORY_IMAGE_GEN)
             self._set_image_generate_button_running(False)
+            return
+
+        # v2026.06.01.9: auto-pull the selected checkpoint silently if it's
+        # a downloadable catalog entry that isn't on disk yet. Matches the
+        # chat-tab UX (Ollama models auto-pull on first use). Returns True
+        # when a background download started — we MUST return here and let
+        # ``_image_checkpoint_downloaded`` re-enter Generate when ready.
+        ensure_result = self._ensure_selected_image_checkpoint_present(model_filename)
+        if ensure_result is True:
+            return
+        if ensure_result is False:
             return
 
         try:
