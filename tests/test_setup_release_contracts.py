@@ -663,45 +663,98 @@ class SetupReleaseContractTests(unittest.TestCase):
         self.assertNotIn("nude", fixture.group(1).lower())
 
     def test_setup_utility_install_preserves_directml_onnx(self):
+        """v2026.06.01.7 (Ron, 2026-06-01): the reconcile step is now
+        variant-aware. Pre-v.7 this unconditionally re-installed
+        onnxruntime-directml even on NVIDIA boxes, which collided with the
+        -gpu wheel and broke onnxruntime.__file__. Post-v.7 the message
+        carries the SKU label, the chosen variant is templated via
+        !SETUP_ONNX_PKG! / !SETUP_ONNX_GENAI_PKG!, and the provider check
+        uses !SETUP_ONNX_EP!. DirectML still works on AMD/Intel boxes via
+        the SETUP_HAS_DML_GPU branch.
+        """
         setup = read("setup.bat")
+        # DirectML pair must still be referenced (in the purge list AND in
+        # the SETUP_HAS_DML_GPU branch of :detect_setup_hardware).
+        self.assertIn("onnxruntime-directml", setup)
         self.assertIn("onnxruntime-genai-directml", setup)
-        self.assertIn("Re-applying DirectML ONNX runtime after utility packages", setup)
+        # Reconcile message is now variant-aware (uses !SETUP_ONNX_LABEL!).
+        self.assertIn(
+            "Reconciling !SETUP_ONNX_LABEL! ONNX runtime after utility packages",
+            setup,
+            "v2026.06.01.7: reconcile message must use !SETUP_ONNX_LABEL! "
+            "so NVIDIA boxes don't print misleading 'DirectML' text.",
+        )
+        # Provider check is variable, not hard-coded.
+        self.assertIn("!SETUP_ONNX_EP!", setup)
+        # Success message is now variant-aware.
+        self.assertIn(
+            "[OK] !SETUP_ONNX_LABEL! ONNX provider verified after utility install.",
+            setup,
+        )
+        # DmlExecutionProvider must still be a possible target (set in the
+        # SETUP_HAS_DML_GPU branch of :detect_setup_hardware).
         self.assertIn("DmlExecutionProvider", setup)
-        self.assertIn("DirectML ONNX provider verified after utility install", setup)
 
     def test_setup_uninstalls_bare_onnxruntime_before_directml(self):
-        """Pre-existing or utility-pulled `onnxruntime` (CPU) shadows
-        `onnxruntime-directml` because both wheels install into the same
-        `onnxruntime/` Python package. setup.bat MUST `pip uninstall -y
-        onnxruntime onnxruntime-genai` immediately before each `pip install
-        onnxruntime-directml` so the DML wheel wins. Without this step,
-        DmlExecutionProvider isn't visible after install on any Python env
-        that already has the CPU variant (e.g., from insightface, or from
-        our own utility install which depends on `optimum[onnxruntime]`).
-        Regression originally observed 2026-05-31 on a clean-machine RTX
-        repo test where the dependency-resolver pulled bare onnxruntime.
+        """v2026.06.01.7 (Ron, 2026-06-01): superset of the original v.6
+        contract. The bug originally observed 2026-05-31 (CPU `onnxruntime`
+        from `optimum[onnxruntime]` shadowing `onnxruntime-directml`) was a
+        symptom of a broader namespace-collision class: any TWO of the
+        three runtime wheels (`onnxruntime`, `onnxruntime-gpu`,
+        `onnxruntime-directml`) installed side by side leave
+        `onnxruntime.__file__ == None` and `InferenceSession` gone. v.7
+        purges ALL SIX mutually-exclusive packages (3 runtimes + 3 genai)
+        immediately before each install. This test pins the broader
+        contract: every `pip install` of an onnxruntime runtime variant
+        must be preceded by an `uninstall -y` of all six within a small
+        window. The earlier narrow contract (uninstall bare onnxruntime
+        before -directml) was the v.6 fix that turned out to be
+        insufficient on NVIDIA boxes — Toolbox Speak regressed on a
+        workstation-class GPU with v.6 because -gpu was the colliding
+        variant, not bare CPU.
         """
         setup_lines = read("setup.bat").splitlines()
-        install_indices = [
-            i for i, line in enumerate(setup_lines)
-            if "pip install" in line and "onnxruntime-directml" in line
-        ]
+        # Any line that pip-installs a runtime variant (templated via
+        # !SETUP_ONNX_PKG! OR hard-coded onnxruntime-directml etc.).
+        runtime_tokens = (
+            "!SETUP_ONNX_PKG!",
+            "onnxruntime-directml",
+            "onnxruntime-gpu",
+        )
+        install_indices = []
+        for i, line in enumerate(setup_lines):
+            if "pip install" not in line or "pip uninstall" in line:
+                continue
+            if any(tok in line for tok in runtime_tokens):
+                install_indices.append(i)
         self.assertGreaterEqual(
             len(install_indices), 2,
-            "expected at least 2 onnxruntime-directml install lines "
-            "(initial ONNX step + utility re-apply); found %d" % len(install_indices),
+            "expected at least 2 onnxruntime runtime install lines "
+            "(initial ONNX step + utility reconcile); found %d" % len(install_indices),
         )
         for idx in install_indices:
             preamble = "\n".join(setup_lines[max(0, idx - 10):idx])
-            self.assertRegex(
-                preamble,
-                r"pip\s+uninstall\s+-y\s+onnxruntime(?!\-)",
-                msg=(
-                    f"setup.bat line {idx + 1}: must `pip uninstall -y "
-                    f"onnxruntime ...` immediately before installing "
-                    f"onnxruntime-directml. Preamble was:\n{preamble}"
-                ),
-            )
+            # Must purge all SIX variants, not just bare onnxruntime.
+            for pkg in (
+                "onnxruntime",
+                "onnxruntime-gpu",
+                "onnxruntime-directml",
+                "onnxruntime-genai",
+                "onnxruntime-genai-cuda",
+                "onnxruntime-genai-directml",
+            ):
+                self.assertRegex(
+                    preamble,
+                    rf"pip\s+uninstall\s+-y[^\n]*\b{re.escape(pkg)}\b",
+                    msg=(
+                        f"setup.bat line {idx + 1}: must `pip uninstall -y "
+                        f"... {pkg} ...` immediately before installing an "
+                        f"onnxruntime runtime variant. v2026.06.01.7 requires "
+                        f"all six mutually-exclusive packages be purged so a "
+                        f"prior-run half-install can't shadow the chosen wheel. "
+                        f"Preamble was:\n{preamble}"
+                    ),
+                )
 
     def test_interactive_onnx_loader_uses_genai_for_phi_bundles(self):
         app = read("src/app.py")
@@ -2132,6 +2185,132 @@ class DiagnosticLogContractTests(unittest.TestCase):
             ".gitignore must exclude setup.log — reserved name for future "
             "setup transcript capture; never belongs in source control.",
         )
+
+
+class OnnxRuntimeVariantContractTests(unittest.TestCase):
+    """v2026.06.01.7 (Ron, 2026-06-01): setup.bat must install exactly ONE
+    onnxruntime runtime variant (onnxruntime / onnxruntime-gpu /
+    onnxruntime-directml) and exactly ONE genai variant chosen by detected
+    GPU vendor. The three runtime packages share the onnxruntime/ namespace
+    and are mutually exclusive — installing more than one leaves
+    onnxruntime.__file__ == None and InferenceSession gone (workstation-class
+    Py3.13 regression that broke Toolbox Speak in v.6).
+    """
+
+    def test_setup_defines_onnx_variant_vars_from_gpu_vendor(self):
+        setup = read("setup.bat")
+        self.assertIn(":detect_setup_hardware", setup)
+        block_start = setup.index(":detect_setup_hardware")
+        block_end = setup.index("goto :eof", block_start)
+        block = setup[block_start:block_end]
+        # The variant selector must live inside :detect_setup_hardware so
+        # SETUP_ONNX_PKG is populated before any pip install runs.
+        self.assertIn("SETUP_HAS_NVIDIA", block)
+        self.assertIn("SETUP_HAS_DML_GPU", block)
+        self.assertIn('set "SETUP_ONNX_PKG=onnxruntime-gpu"', block)
+        self.assertIn('set "SETUP_ONNX_GENAI_PKG=onnxruntime-genai-cuda"', block)
+        self.assertIn('set "SETUP_ONNX_EP=CUDAExecutionProvider"', block)
+        self.assertIn('set "SETUP_ONNX_PKG=onnxruntime-directml"', block)
+        self.assertIn('set "SETUP_ONNX_GENAI_PKG=onnxruntime-genai-directml"', block)
+        self.assertIn('set "SETUP_ONNX_EP=DmlExecutionProvider"', block)
+        self.assertIn('set "SETUP_ONNX_PKG=onnxruntime"', block)
+        self.assertIn('set "SETUP_ONNX_GENAI_PKG=onnxruntime-genai"', block)
+        self.assertIn('set "SETUP_ONNX_EP=CPUExecutionProvider"', block)
+
+    def test_setup_onnx_install_purges_all_variants_before_install(self):
+        """All six mutually-exclusive packages (3 runtimes + 3 genai)
+        must be uninstalled BEFORE installing the chosen variant so a
+        half-installed state from any prior run cannot shadow the chosen
+        wheel and break the onnxruntime namespace."""
+        setup = read("setup.bat")
+        # The ONNX install block runs between [*] Installing ONNX runtime
+        # packages and the OpenVINO section.
+        onnx_start = setup.index("[*] Installing ONNX runtime packages")
+        onnx_end = setup.index(":done_onnx", onnx_start)
+        onnx_block = setup[onnx_start:onnx_end]
+        for pkg in (
+            "onnxruntime", "onnxruntime-gpu", "onnxruntime-directml",
+            "onnxruntime-genai", "onnxruntime-genai-cuda", "onnxruntime-genai-directml",
+        ):
+            self.assertIn(
+                pkg, onnx_block,
+                f"setup.bat ONNX install block must reference {pkg} in the "
+                "pre-install purge so prior-run half-installed state cannot "
+                "shadow the chosen wheel (v2026.06.01.7).",
+            )
+        # The install line must use the variables, not hard-coded -directml.
+        self.assertIn("!SETUP_ONNX_PKG!", onnx_block)
+        self.assertIn("!SETUP_ONNX_GENAI_PKG!", onnx_block)
+        # The smoke gate must check both InferenceSession AND
+        # ort.__file__ is not None (the broken-namespace signature).
+        self.assertIn("from onnxruntime import InferenceSession", onnx_block)
+        self.assertIn("ort.__file__ is not None", onnx_block)
+        self.assertIn("!SETUP_ONNX_EP!", onnx_block)
+
+    def test_setup_utility_reconcile_uses_chosen_variant_not_hardcoded_directml(self):
+        """The post-utility reconcile step used to unconditionally reinstall
+        onnxruntime-directml regardless of GPU vendor. On NVIDIA boxes this
+        installed BOTH -gpu (left by an earlier dep) AND -directml, leaving
+        onnxruntime.__file__ == None. v2026.06.01.7 must use !SETUP_ONNX_PKG!
+        so the chosen variant wins.
+        """
+        setup = read("setup.bat")
+        # The reconcile block runs after :done_utility's predecessor.
+        reconcile_start = setup.index("Reconciling")
+        reconcile_end = setup.index(":done_utility", reconcile_start)
+        reconcile_block = setup[reconcile_start:reconcile_end]
+        # Must purge ALL six packages first.
+        for pkg in (
+            "onnxruntime", "onnxruntime-gpu", "onnxruntime-directml",
+            "onnxruntime-genai", "onnxruntime-genai-cuda", "onnxruntime-genai-directml",
+        ):
+            self.assertIn(pkg, reconcile_block)
+        # Must install the chosen variant via variable expansion.
+        self.assertIn("!SETUP_ONNX_PKG!", reconcile_block)
+        self.assertIn("!SETUP_ONNX_GENAI_PKG!", reconcile_block)
+        # The pre-v.7 bug: hard-coded "onnxruntime-directml onnxruntime-genai-directml"
+        # on the install line. Make sure that exact pair no longer appears as
+        # an install argument (it may still appear in the purge list).
+        self.assertNotIn(
+            "pip install --upgrade --no-warn-conflicts onnxruntime-directml onnxruntime-genai-directml",
+            reconcile_block,
+            "setup.bat reconcile step must use !SETUP_ONNX_PKG! "
+            "!SETUP_ONNX_GENAI_PKG!, not hard-code the DirectML pair. "
+            "Hard-coding DirectML on NVIDIA boxes is what caused the v.6 "
+            "Toolbox Speak regression (mutually-exclusive onnxruntime "
+            "variants installed side by side, namespace broken).",
+        )
+        # cwd guard: the v.6 setup log printed "The system cannot find the
+        # drive specified." twice from this block. Pin cwd to script dir.
+        self.assertIn('cd /d "%~dp0"', reconcile_block)
+        # Smoke gate must check the broken-namespace signature.
+        self.assertIn("from onnxruntime import InferenceSession", reconcile_block)
+        self.assertIn("ort.__file__ is not None", reconcile_block)
+        self.assertIn("!SETUP_ONNX_EP!", reconcile_block)
+
+    def test_setup_does_not_install_two_onnxruntime_runtimes_on_same_line(self):
+        """Defense in depth: no single pip install line in setup.bat may
+        name two of the mutually-exclusive runtime packages together, ever.
+        """
+        setup = read("setup.bat")
+        runtime_pkgs = ("onnxruntime-gpu", "onnxruntime-directml")
+        for line in setup.splitlines():
+            # Skip purge lines (uninstall is FINE to list all of them).
+            if "pip uninstall" in line:
+                continue
+            # Skip comment lines.
+            if line.strip().startswith("::"):
+                continue
+            # Skip echo lines (error guidance shown to user, not a pip cmd).
+            if line.strip().lower().startswith("echo"):
+                continue
+            present = [p for p in runtime_pkgs if p in line]
+            if len(present) > 1:
+                self.fail(
+                    f"setup.bat installs mutually-exclusive onnxruntime "
+                    f"runtimes on the same line: {present!r}. Pick exactly "
+                    f"one via !SETUP_ONNX_PKG!.\n  Offending line: {line.strip()}"
+                )
 
 
 if __name__ == "__main__":

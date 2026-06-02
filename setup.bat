@@ -214,25 +214,27 @@ if "!SETUP_ALL_FEATURES!"=="1" (
 )
 if /i not "!INSTALL_ONNX!"=="y" goto :skip_onnx
 
-echo [*] Installing ONNX/DirectML runtime packages ...
-:: Clear any bare `onnxruntime` (CPU) variant before installing the DML build.
-:: Both packages install into the same `onnxruntime/` Python package directory;
-:: having both present causes the CPU wheel to shadow the DML one and hides
-:: DmlExecutionProvider from ort.get_available_providers(). Pre-existing
-:: packages (insightface, etc.) and our own utility step (re-)install bare
-:: onnxruntime, so we must explicitly uninstall before each DML install.
-:: AGENTS.md: "Utility setup must not undo DirectML ONNX".
-"%PYTHON_EXE%" -m pip uninstall -y onnxruntime onnxruntime-genai >nul 2>&1
-"%PYTHON_EXE%" -m pip install --upgrade --no-warn-conflicts onnxruntime-directml onnxruntime-genai-directml "optimum[onnxruntime]" transformers "huggingface-hub>=0.34.0,<1.0" --quiet
+echo [*] Installing ONNX runtime packages (variant: !SETUP_ONNX_LABEL!) ...
+:: v2026.06.01.7 (Ron, 2026-06-01): branch on GPU vendor and install exactly
+:: ONE onnxruntime runtime + ONE onnxruntime-genai variant. The three runtime
+:: packages (onnxruntime / onnxruntime-gpu / onnxruntime-directml) and the
+:: three genai packages (-genai / -genai-cuda / -genai-directml) all install
+:: into the same onnxruntime/ namespace -- installing more than one leaves
+:: onnxruntime.__file__ == None and InferenceSession gone (workstation-class
+:: Py3.13 regression that broke Toolbox Speak in v.6). Pre-purge ALL six variants
+:: before each install so half-installed state from any earlier run cannot
+:: shadow the chosen wheel.
+"%PYTHON_EXE%" -m pip uninstall -y onnxruntime onnxruntime-gpu onnxruntime-directml onnxruntime-genai onnxruntime-genai-cuda onnxruntime-genai-directml >nul 2>&1
+"%PYTHON_EXE%" -m pip install --upgrade --no-warn-conflicts !SETUP_ONNX_PKG! !SETUP_ONNX_GENAI_PKG! "optimum[onnxruntime]" transformers "huggingface-hub>=0.34.0,<1.0" --quiet
 if errorlevel 1 (
     echo [WARNING] Some ONNX packages failed. App still works with Ollama backend.
 ) else (
     echo [OK] ONNX/NPU packages installed.
-    "%PYTHON_EXE%" -c "import onnxruntime as ort; providers=ort.get_available_providers(); assert 'DmlExecutionProvider' in providers, providers" >nul 2>&1
+    "%PYTHON_EXE%" -c "from onnxruntime import InferenceSession; import onnxruntime as ort; assert ort.__file__ is not None, 'onnxruntime namespace is broken (mutually exclusive variants collided)'; providers=ort.get_available_providers(); assert '!SETUP_ONNX_EP!' in providers, providers" >nul 2>&1
     if errorlevel 1 (
-        echo [WARNING] DirectML ONNX provider was not detected after install.
+        echo [WARNING] !SETUP_ONNX_LABEL! ONNX provider was not detected after install.
     ) else (
-        echo [OK] DirectML ONNX provider verified.
+        echo [OK] !SETUP_ONNX_LABEL! ONNX provider verified.
     )
 )
 goto :done_onnx
@@ -274,21 +276,32 @@ if errorlevel 1 (
     echo [OK] Utility demo packages installed.
 )
 if /i "!INSTALL_ONNX!"=="y" (
-    echo [*] Re-applying DirectML ONNX runtime after utility packages ...
-    :: Utility install above pulls plain `onnxruntime` (CPU) via dep extras
-    :: like optimum[onnxruntime]. Uninstall it before re-applying the DML
-    :: variant so the DML wheel wins. See AGENTS.md "Utility setup must
-    :: not undo DirectML ONNX".
-    "%PYTHON_EXE%" -m pip uninstall -y onnxruntime onnxruntime-genai >nul 2>&1
-    "%PYTHON_EXE%" -m pip install --upgrade --no-warn-conflicts onnxruntime-directml onnxruntime-genai-directml --quiet
+    echo [*] Reconciling !SETUP_ONNX_LABEL! ONNX runtime after utility packages ...
+    :: v2026.06.01.7 (Ron, 2026-06-01): utility install above pulls bare
+    :: `onnxruntime` (CPU) via dep extras like optimum[onnxruntime]; on
+    :: NVIDIA / AMD-Intel boxes this would shadow the GPU / DML wheel we
+    :: chose in the ONNX install step, leaving onnxruntime.__file__ == None
+    :: and InferenceSession gone. Purge ALL six variants and re-install the
+    :: chosen one so it definitively wins. cd back to the script dir first
+    :: in case any earlier step left cwd on a now-missing drive (a
+    :: workstation-class setup log in v.6 showed two spurious "The system
+    :: cannot find the drive specified." messages right here -- pinning
+    :: cwd suppresses them).
+    cd /d "%~dp0"
+    "%PYTHON_EXE%" -m pip uninstall -y onnxruntime onnxruntime-gpu onnxruntime-directml onnxruntime-genai onnxruntime-genai-cuda onnxruntime-genai-directml >nul 2>&1
+    "%PYTHON_EXE%" -m pip install --upgrade --no-warn-conflicts !SETUP_ONNX_PKG! !SETUP_ONNX_GENAI_PKG! --quiet
     if errorlevel 1 (
-        echo [WARNING] DirectML ONNX runtime re-install failed. ONNX/NPU acceleration may be unavailable.
+        echo [WARNING] !SETUP_ONNX_LABEL! ONNX runtime re-install failed. ONNX/NPU acceleration may be unavailable.
     ) else (
-        "%PYTHON_EXE%" -c "import onnxruntime as ort; providers=ort.get_available_providers(); assert 'DmlExecutionProvider' in providers, providers" >nul 2>&1
+        "%PYTHON_EXE%" -c "from onnxruntime import InferenceSession; import onnxruntime as ort; assert ort.__file__ is not None, 'onnxruntime namespace is broken (mutually exclusive variants collided)'; providers=ort.get_available_providers(); assert '!SETUP_ONNX_EP!' in providers, providers" >nul 2>&1
         if errorlevel 1 (
-            echo [WARNING] DirectML ONNX provider was not detected after utility install.
+            echo [ERROR] !SETUP_ONNX_LABEL! ONNX provider missing or onnxruntime namespace is broken after utility install.
+            echo         Toolbox features that import InferenceSession will fail.
+            echo         Re-run setup.bat to retry, or manually:
+            echo           "%PYTHON_EXE%" -m pip uninstall -y onnxruntime onnxruntime-gpu onnxruntime-directml onnxruntime-genai onnxruntime-genai-cuda onnxruntime-genai-directml
+            echo           "%PYTHON_EXE%" -m pip install !SETUP_ONNX_PKG! !SETUP_ONNX_GENAI_PKG!
         ) else (
-            echo [OK] DirectML ONNX provider verified after utility install.
+            echo [OK] !SETUP_ONNX_LABEL! ONNX provider verified after utility install.
         )
     )
 )
@@ -551,6 +564,30 @@ for /f "usebackq delims=" %%G in (`powershell -NoProfile -Command "$g=Get-CimIns
 if defined SETUP_NVIDIA_GPU_NAMES set SETUP_HAS_NVIDIA=1
 for /f "usebackq delims=" %%G in (`powershell -NoProfile -Command "$g=Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -and $_.Name -notmatch 'Microsoft|Basic|Remote|Hyper-V|NVIDIA|GeForce|RTX|Quadro' -and $_.Name -match 'AMD|Radeon|Intel|Arc|Iris|UHD|Xe' }; if ($g) { ($g | ForEach-Object { $_.Name }) -join ', ' }" 2^>nul`) do set "SETUP_DML_GPU_NAMES=%%G"
 if defined SETUP_DML_GPU_NAMES set SETUP_HAS_DML_GPU=1
+:: v2026.06.01.7 (Ron, 2026-06-01): pick exactly ONE onnxruntime variant
+:: based on detected GPU vendor. onnxruntime / onnxruntime-gpu /
+:: onnxruntime-directml all install into the same onnxruntime/ namespace
+:: and are mutually exclusive. Installing two side-by-side leaves the
+:: namespace half-broken (onnxruntime.__file__ is None, InferenceSession
+:: vanishes) and Toolbox features that do `from onnxruntime import
+:: InferenceSession` crash. Branching here so every later pip install
+:: step uses the same chosen variant.
+if "!SETUP_HAS_NVIDIA!"=="1" (
+    set "SETUP_ONNX_PKG=onnxruntime-gpu"
+    set "SETUP_ONNX_GENAI_PKG=onnxruntime-genai-cuda"
+    set "SETUP_ONNX_EP=CUDAExecutionProvider"
+    set "SETUP_ONNX_LABEL=NVIDIA CUDA"
+) else if "!SETUP_HAS_DML_GPU!"=="1" (
+    set "SETUP_ONNX_PKG=onnxruntime-directml"
+    set "SETUP_ONNX_GENAI_PKG=onnxruntime-genai-directml"
+    set "SETUP_ONNX_EP=DmlExecutionProvider"
+    set "SETUP_ONNX_LABEL=DirectML"
+) else (
+    set "SETUP_ONNX_PKG=onnxruntime"
+    set "SETUP_ONNX_GENAI_PKG=onnxruntime-genai"
+    set "SETUP_ONNX_EP=CPUExecutionProvider"
+    set "SETUP_ONNX_LABEL=CPU"
+)
 goto :eof
 
 :install_cuda_pytorch
