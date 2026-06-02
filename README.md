@@ -51,14 +51,11 @@ setup.bat
 run.bat
 ```
 
-> 💡 **Recommended for setup diagnostics:** right-click `setup.ps1` and
-> choose **"Run with PowerShell"** instead of double-clicking `setup.bat`.
-> The PowerShell wrapper captures everything the installer prints to
-> `setup.log` next to the script (and always pauses at the end), so when
-> something goes wrong you have a complete record to share rather than a
-> console window that flashed past too fast to read. `setup.ps1` runs the
-> exact same `setup.bat` — it just adds the transcript and the
-> guaranteed pause.
+> 💡 **Setup is auto-logged.** Double-clicking `setup.bat` runs the
+> installer inside a PowerShell transcript that captures everything to
+> `setup.log` next to the script and pauses at the end — so if anything
+> goes wrong you have a complete record to share instead of a console
+> window that closed too fast to read. No extra steps required.
 
 The first-run setup detects your hardware (CPU only, NVIDIA GPU, or
 AMD/Intel GPU) and installs an appropriate PyTorch wheel + ComfyUI

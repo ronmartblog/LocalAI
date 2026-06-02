@@ -5440,7 +5440,7 @@ class ComfyUIInstallResolverContractTests(unittest.TestCase):
     """v2026.06.01.9 — pin the multi-location ComfyUI install resolver so
     a fresh app extraction on top of an existing install (the v.N+1
     upgrade-in-place pattern) still finds the sibling-of-app ComfyUI
-    that ``setup.bat`` itself searches for at line ~388
+    that ``setup1.bat`` itself searches for at line ~388
     (``%~dp0..\\ComfyUI``). Prior to v.9 the resolver only checked the
     child location (``<app>/ComfyUI``) so the Image Gen tab and
     benchmark both reported "ComfyUI not installed at expected paths"
@@ -5478,10 +5478,10 @@ class ComfyUIInstallResolverContractTests(unittest.TestCase):
         self.assertIn("_resolve_existing_comfyui_install", load_src,
                       "config.load() must consult _resolve_existing_comfyui_install "
                       "so empty / missing comfyui_dir auto-heals to the sibling-of-app "
-                      "location that setup.bat also searches.")
+                      "location that setup1.bat also searches.")
 
     def test_candidate_comfyui_install_dirs_returns_child_then_sibling(self):
-        """The candidate order must match setup.bat's own lookup at lines
+        """The candidate order must match setup1.bat's own lookup at lines
         ~381 + ~388: child (``<app>/ComfyUI``) first, sibling
         (``<app>/../ComfyUI``) second. Order matters because a fresh
         install creates the child first."""
@@ -5563,8 +5563,8 @@ class ImageGenAutoPullContractTests(unittest.TestCase):
 
 
 class IncompleteSetupBannerContractTests(unittest.TestCase):
-    """v2026.06.01.10 — pin the in-app incomplete-setup banner so a
-    silently-failed install (setup.bat auto-closed, CUDA not installed,
+    """v2026.06.01.10–11 — pin the in-app incomplete-setup banner so a
+    silently-failed install (setup window auto-closed, CUDA not installed,
     Ollama not installed) surfaces a visible warning at the top of every
     page instead of only quiet log lines.
     """
@@ -5659,20 +5659,59 @@ class IncompleteSetupBannerContractTests(unittest.TestCase):
 
 
 class SetupPs1WrapperContractTests(unittest.TestCase):
-    """v2026.06.01.10 — pin the setup.ps1 PowerShell wrapper contract so
-    setup output is captured to setup.log even when the cmd window
-    auto-closes before the user can see what happened. setup.ps1 lives
-    OUTSIDE the cmd process so it does NOT trigger the v.4-era
-    self-tee regression that broke ``set /p`` prompts.
+    """v2026.06.01.10–11 — pin the setup.bat / setup.ps1 / setup1.bat
+    three-file structure that gives users an auto-captured setup.log
+    without changing their muscle-memory:
+
+      setup.bat   = tiny shim (5–40 lines) that launches setup.ps1
+      setup.ps1   = transcript wrapper; Start-Transcript -> setup.log,
+                    then invokes setup1.bat, then unconditional pause
+      setup1.bat  = the real installer (renamed from the original setup.bat)
+
+    setup.ps1 sits OUTSIDE the cmd process that runs setup1.bat (it spawns
+    a fresh powershell.exe), so this is NOT the v.4-era self-tee
+    regression that broke ``set /p`` prompts via block buffering.
     """
 
     SETUP_PS1 = ROOT / "setup.ps1"
     SETUP_BAT = ROOT / "setup.bat"
+    SETUP1_BAT = ROOT / "setup1.bat"
 
-    def test_setup_ps1_exists_next_to_setup_bat(self):
-        self.assertTrue(self.SETUP_PS1.is_file(),
-                        "setup.ps1 must exist next to setup.bat — it's the "
-                        "Fix A wrapper that captures setup.log diagnostics.")
+    def test_all_three_setup_files_exist(self):
+        for path in (self.SETUP_BAT, self.SETUP_PS1, self.SETUP1_BAT):
+            with self.subTest(file=path.name):
+                self.assertTrue(path.is_file(),
+                                f"{path.name} must exist alongside the others "
+                                "as part of the shim -> wrapper -> installer "
+                                "chain. If renaming happened, update the "
+                                "v.11 publish pipeline and AGENTS.md too.")
+
+    def test_setup_bat_is_a_shim_that_launches_setup_ps1(self):
+        """The user-facing setup.bat must be a tiny shim that defers to
+        setup.ps1 (which in turn calls setup1.bat under Start-Transcript)."""
+        text = self.SETUP_BAT.read_text(encoding="utf-8")
+        # Sanity check on size — original setup.bat was ~42KB. The shim
+        # must stay tiny so it's obvious at a glance that it's a launcher,
+        # not the installer. 4KB ceiling leaves room for comments + the
+        # error-path messages, but rules out anyone re-adding install logic.
+        self.assertLess(len(text), 4096,
+                        f"setup.bat must remain a tiny shim ({len(text)} bytes "
+                        "is too large). The real install logic lives in "
+                        "setup1.bat — do not move it back.")
+        self.assertIn("setup.ps1", text,
+                      "setup.bat shim must reference setup.ps1 (its launch "
+                      "target).")
+        self.assertIn("powershell", text.lower(),
+                      "setup.bat shim must invoke powershell.exe to launch "
+                      "setup.ps1.")
+        # The shim must NOT carry the install logic env-var block. If any of
+        # these markers appear, someone re-added installer logic to the shim.
+        for installer_marker in ("LOCALAI_PYTHON", "pip install", "winget"):
+            with self.subTest(marker=installer_marker):
+                self.assertNotIn(installer_marker, text,
+                                 f"setup.bat shim must not contain "
+                                 f"installer marker '{installer_marker}' — "
+                                 "that logic belongs in setup1.bat.")
 
     def test_setup_ps1_uses_start_transcript_to_write_setup_log(self):
         text = self.SETUP_PS1.read_text(encoding="utf-8")
@@ -5684,20 +5723,20 @@ class SetupPs1WrapperContractTests(unittest.TestCase):
                       "crash-path message tells users to look for that file.")
 
     def test_setup_ps1_has_unconditional_pause_at_end(self):
-        """Even if setup.bat hits an early-exit path that skips its own
+        """Even if setup1.bat hits an early-exit path that skips its own
         pause, the PowerShell wrapper must hold the window open."""
         text = self.SETUP_PS1.read_text(encoding="utf-8")
         self.assertIn("Read-Host", text,
                       "setup.ps1 must call Read-Host to pause for the user "
                       "before closing the window.")
 
-    def test_setup_ps1_does_not_modify_setup_bat(self):
-        """setup.ps1 must NOT introduce an in-bat tee — the v.4 tee
-        regression broke ``set /p`` prompts via block buffering."""
+    def test_setup_ps1_invokes_setup1_bat(self):
+        """setup.ps1 is the wrapper for the real installer (setup1.bat).
+        It must NOT invoke setup.bat (its own caller) or it would loop."""
         text = self.SETUP_PS1.read_text(encoding="utf-8")
-        # Wrapper must invoke setup.bat as an external command, not edit it.
-        self.assertIn("setup.bat", text,
-                      "setup.ps1 must reference setup.bat by name.")
+        self.assertIn("setup1.bat", text,
+                      "setup.ps1 must reference setup1.bat — that's the "
+                      "actual installer it wraps.")
         # And it must NOT pipe cmd's stdout through Tee-Object (that's the
         # forbidden pattern). Start-Transcript captures from the host
         # console, which sidesteps the buffering issue.
@@ -5705,11 +5744,11 @@ class SetupPs1WrapperContractTests(unittest.TestCase):
                          "setup.ps1 must not pipe cmd's stdout through "
                          "Tee-Object — that's the forbidden v.4 pattern.")
 
-    def test_setup_bat_remains_unwrapped(self):
-        """Sanity check: setup.bat itself must NOT have been quietly
-        re-tee'd as part of v.10. The PowerShell wrapper is the only
+    def test_setup1_bat_remains_unwrapped(self):
+        """Sanity check: setup1.bat (the real installer) must NOT have
+        been quietly re-tee'd. The PowerShell wrapper is the only
         capture mechanism."""
-        text = self.SETUP_BAT.read_text(encoding="utf-8")
+        text = self.SETUP1_BAT.read_text(encoding="utf-8")
         # The v.4 self-tee key tokens must NOT have come back.
         self.assertNotIn("LOCALAI_SETUP_TEED", text)
         self.assertNotIn("Tee-Object", text)

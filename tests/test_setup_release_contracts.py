@@ -28,7 +28,7 @@ SKIP_WHEN_PUBLIC = unittest.skipUnless(
 
 class SetupReleaseContractTests(unittest.TestCase):
     def test_python_path_variable_is_consistent_across_launchers(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         self.assertIn("LOCALAI_PYTHON", setup)
         for rel in ["run.bat", "run_batch.bat", "verify_models.bat", "fix_nvidia_pytorch.bat", "fix_directml_pytorch.bat", "uninstall.bat"]:
             text = read(rel)
@@ -41,7 +41,8 @@ class SetupReleaseContractTests(unittest.TestCase):
         plan = plan_path.read_text(encoding="utf-8", errors="ignore") if plan_path.exists() else ""
         required = [
             "src\\", "docs\\", "AGENTS.md", "main.py", "run.bat", "run.sh",
-            "run_batch.bat", "run_batch.py", "setup.bat", "setup.sh",
+            "run_batch.bat", "run_batch.py", "setup.bat", "setup1.bat",
+            "setup.ps1", "setup.sh",
             "uninstall.bat", "uninstall.sh", "fix_nvidia_pytorch.bat",
             "fix_directml_pytorch.bat",
             "set_ollama_models_dir.bat",
@@ -104,7 +105,7 @@ class SetupReleaseContractTests(unittest.TestCase):
 
     def test_toolbox_package_sets_include_core_hidden_dependencies(self):
         app = read("src/app.py")
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         uninstall = read("uninstall.bat")
         requirements = read("requirements.txt")
         match = re.search(r"full_package_set = \[(.*?)\]\s+dep_to_package", app, re.S)
@@ -124,7 +125,7 @@ class SetupReleaseContractTests(unittest.TestCase):
 
     @SKIP_WHEN_PUBLIC
     def test_huggingface_hub_is_pinned_below_one_in_install_paths(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         setup_sh = read("setup.sh")
         app = read("src/app.py")
         main = read("main.py")
@@ -136,7 +137,7 @@ class SetupReleaseContractTests(unittest.TestCase):
 
         pin = "huggingface-hub>=0.34.0,<1.0"
         for label, text in [
-            ("setup.bat", setup),
+            ("setup1.bat", setup),
             ("setup.sh", setup_sh),
             ("src/app.py", app),
             ("main.py", main),
@@ -158,7 +159,7 @@ class SetupReleaseContractTests(unittest.TestCase):
         self.assertIn("-m pip check", setup)
 
     def test_setup_repairs_orphaned_gguf_dependencies_before_core_install(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         repair_start = setup.index("Older uninstall.bat versions could remove gguf")
         core_start = setup.index("Installing required packages")
         self.assertLess(repair_start, core_start)
@@ -168,7 +169,7 @@ class SetupReleaseContractTests(unittest.TestCase):
         self.assertIn('"tqdm>=4.27"', repair_block)
 
     def test_setup_pip_check_runs_after_image_generation_repairs(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         self.assertLess(
             setup.index("ComfyUI startup dependencies verified"),
             setup.index("Verifying Python dependency consistency"),
@@ -212,13 +213,13 @@ class SetupReleaseContractTests(unittest.TestCase):
         self.assertIn("Do not delete backups, archives, or subdirectory zips.", agents)
 
     def test_setup_all_features_defaults_to_applicable_installs(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         self.assertIn('set /p SETUP_ALL_FEATURES="Setup all features? [Y/n]: "', setup)
         self.assertIn('if "!SETUP_ALL_FEATURES!"=="" set SETUP_ALL_FEATURES=y', setup)
         self.assertIn("call :detect_setup_hardware", setup)
 
     def test_setup_all_features_prompt_is_first_setup_prompt(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         prompts = re.findall(r"set /p ([A-Z_]+)=", setup)
         self.assertGreater(len(prompts), 1)
         self.assertEqual(prompts[0], "SETUP_ALL_FEATURES")
@@ -228,7 +229,7 @@ class SetupReleaseContractTests(unittest.TestCase):
         )
 
     def test_setup_all_features_yes_bypasses_individual_feature_prompts(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         prompt_by_var = {
             "INSTALL_ONNX": "Install NPU/DirectML (ONNX Runtime) support? [y/N]: ",
             "INSTALL_OPENVINO": "Install OpenVINO GenAI support? [y/N]: ",
@@ -247,7 +248,7 @@ class SetupReleaseContractTests(unittest.TestCase):
             self.assertRegex(setup, pattern, var)
 
     def test_setup_all_features_gpu_acceleration_is_hardware_gated(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         start = setup.index('if "!SETUP_ALL_FEATURES!"=="1" (\n    if "!SETUP_HAS_GPU!"=="1" (')
         end = setup.index('if /i "!INSTALL_GPU_ACCEL!"=="y" (', start)
         block = setup[start:end]
@@ -268,7 +269,7 @@ class SetupReleaseContractTests(unittest.TestCase):
         self.assertIn("No supported local GPU detected; skipping GPU image acceleration.", install_block)
 
     def test_setup_installs_comfyui_next_to_app_not_user_profile(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         start = setup.index(":: 6b. Locate or install ComfyUI")
         end = setup.index(":comfyui_found", start)
         block = setup[start:end]
@@ -294,7 +295,7 @@ class SetupReleaseContractTests(unittest.TestCase):
         self.assertNotIn('${HOME}/Library/Application Support/LocalAI', sh_block)
 
     def test_cuda_pytorch_failure_echo_escapes_parentheses_inside_batch_block(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         start = setup.index("\n:install_cuda_pytorch")
         end = setup.index(":install_directml_pytorch", start)
         block = setup[start:end]
@@ -319,7 +320,7 @@ class SetupReleaseContractTests(unittest.TestCase):
         — cmd.exe only special-cases parens inside parenthesized blocks.
         """
         bat_files = [
-            "setup.bat", "run.bat", "run_batch.bat", "uninstall.bat",
+            "setup.bat", "setup1.bat", "run.bat", "run_batch.bat", "uninstall.bat",
             "fix_nvidia_pytorch.bat", "fix_directml_pytorch.bat",
             "verify_models.bat",
             "set_ollama_models_dir.bat",
@@ -368,7 +369,7 @@ class SetupReleaseContractTests(unittest.TestCase):
         self.assertIn("config.save(self.cfg)", block)
 
     def test_setup_hardware_detection_filters_virtual_adapters(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         start = setup.index("\n:detect_setup_hardware")
         end = setup.index(":find_python", start)
         block = setup[start:end]
@@ -382,7 +383,7 @@ class SetupReleaseContractTests(unittest.TestCase):
         self.assertIn("SETUP_DML_GPU_NAMES", block)
 
     def test_nvidia_setup_uses_cuda_not_directml(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         self.assertIn("call :install_cuda_pytorch", setup)
         self.assertIn("call :install_directml_pytorch", setup)
         cuda_start = setup.index("\n:install_cuda_pytorch")
@@ -465,7 +466,7 @@ class SetupReleaseContractTests(unittest.TestCase):
 
     def test_comfyui_startup_dependencies_are_repaired(self):
         app = read("src/app.py")
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         # The Mac launcher (setup.sh) is intentionally absent from the
         # public Windows-only clone. Defer reading it until after the
         # Windows assertions so the bash-side checks can be skipped
@@ -672,7 +673,7 @@ class SetupReleaseContractTests(unittest.TestCase):
         uses !SETUP_ONNX_EP!. DirectML still works on AMD/Intel boxes via
         the SETUP_HAS_DML_GPU branch.
         """
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         # DirectML pair must still be referenced (in the purge list AND in
         # the SETUP_HAS_DML_GPU branch of :detect_setup_hardware).
         self.assertIn("onnxruntime-directml", setup)
@@ -713,7 +714,7 @@ class SetupReleaseContractTests(unittest.TestCase):
         workstation-class GPU with v.6 because -gpu was the colliding
         variant, not bare CPU.
         """
-        setup_lines = read("setup.bat").splitlines()
+        setup_lines = read("setup1.bat").splitlines()
         # Any line that pip-installs a runtime variant (templated via
         # !SETUP_ONNX_PKG! OR hard-coded onnxruntime-directml etc.).
         runtime_tokens = (
@@ -825,7 +826,7 @@ class SetupReleaseContractTests(unittest.TestCase):
         must remain absent — it was the misdiagnosed earlier draft and would
         give false reassurance.
         """
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         fix = read("fix_nvidia_pytorch.bat")
         fix_dml = read("fix_directml_pytorch.bat")
         agents = read("AGENTS.md")
@@ -912,7 +913,7 @@ class DirectMlAbiSelfHealContractTests(unittest.TestCase):
     """
 
     def test_setup_install_directml_pytorch_self_heals_on_abi_drift(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         start = setup.index("\n:install_directml_pytorch")
         end = setup.index("\n:find_python", start)
         block = setup[start:end]
@@ -1190,7 +1191,7 @@ class DirectMlMatchedSetInstallContractTests(unittest.TestCase):
         )
 
     def test_setup_install_directml_pytorch_uses_matched_set_install(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         start = setup.index("\n:install_directml_pytorch")
         end = setup.index("\n:find_python", start)
         block = setup[start:end]
@@ -2103,24 +2104,33 @@ class DiagnosticLogContractTests(unittest.TestCase):
     def test_setup_bat_does_not_use_powershell_tee_wrapper(self):
         """v2026.06.01.5 revert: the self-tee wrapper added in v.4 broke
         interactive prompts. Make sure nobody adds it back without a
-        non-interactive-breaking design."""
-        setup = read("setup.bat")
-        self.assertNotIn(
-            "LOCALAI_SETUP_TEED",
-            setup,
-            "setup.bat must NOT re-introduce the LOCALAI_SETUP_TEED self-tee "
-            "wrapper - it pipes cmd's stdout through PowerShell which switches "
-            "Windows to block buffering and breaks every `set /p` prompt. If "
-            "you want setup transcript capture, design a mechanism that "
-            "preserves interactive console I/O (e.g. on-failure-only copy of "
-            "scrollback, or a non-piping wrapper).",
-        )
-        self.assertNotIn(
-            "Tee-Object",
-            setup,
-            "setup.bat must NOT use PowerShell Tee-Object - same reason as "
-            "above. The output piping breaks `set /p` prompts.",
-        )
+        non-interactive-breaking design.
+
+        v2026.06.01.11 split: setup.bat is now a tiny shim that launches
+        setup.ps1 (which uses Start-Transcript, not Tee-Object), and the
+        actual install logic lives in setup1.bat. Both must remain clean
+        of the LOCALAI_SETUP_TEED / Tee-Object pattern."""
+        for rel in ("setup.bat", "setup1.bat"):
+            with self.subTest(file=rel):
+                text = read(rel)
+                self.assertNotIn(
+                    "LOCALAI_SETUP_TEED",
+                    text,
+                    f"{rel} must NOT re-introduce the LOCALAI_SETUP_TEED "
+                    "self-tee wrapper - it pipes cmd's stdout through "
+                    "PowerShell which switches Windows to block buffering "
+                    "and breaks every `set /p` prompt. If you want setup "
+                    "transcript capture, design a mechanism that preserves "
+                    "interactive console I/O (e.g. on-failure-only copy of "
+                    "scrollback, or a non-piping wrapper).",
+                )
+                self.assertNotIn(
+                    "Tee-Object",
+                    text,
+                    f"{rel} must NOT use PowerShell Tee-Object - same "
+                    "reason as above. The output piping breaks `set /p` "
+                    "prompts.",
+                )
 
     def test_run_bat_writes_session_markers_to_localai_log(self):
         run = read("run.bat")
@@ -2198,7 +2208,7 @@ class OnnxRuntimeVariantContractTests(unittest.TestCase):
     """
 
     def test_setup_defines_onnx_variant_vars_from_gpu_vendor(self):
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         self.assertIn(":detect_setup_hardware", setup)
         block_start = setup.index(":detect_setup_hardware")
         block_end = setup.index("goto :eof", block_start)
@@ -2222,7 +2232,7 @@ class OnnxRuntimeVariantContractTests(unittest.TestCase):
         must be uninstalled BEFORE installing the chosen variant so a
         half-installed state from any prior run cannot shadow the chosen
         wheel and break the onnxruntime namespace."""
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         # The ONNX install block runs between [*] Installing ONNX runtime
         # packages and the OpenVINO section.
         onnx_start = setup.index("[*] Installing ONNX runtime packages")
@@ -2254,7 +2264,7 @@ class OnnxRuntimeVariantContractTests(unittest.TestCase):
         onnxruntime.__file__ == None. v2026.06.01.7 must use !SETUP_ONNX_PKG!
         so the chosen variant wins.
         """
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         # The reconcile block runs after :done_utility's predecessor.
         reconcile_start = setup.index("Reconciling")
         reconcile_end = setup.index(":done_utility", reconcile_start)
@@ -2292,7 +2302,7 @@ class OnnxRuntimeVariantContractTests(unittest.TestCase):
         """Defense in depth: no single pip install line in setup.bat may
         name two of the mutually-exclusive runtime packages together, ever.
         """
-        setup = read("setup.bat")
+        setup = read("setup1.bat")
         runtime_pkgs = ("onnxruntime-gpu", "onnxruntime-directml")
         for line in setup.splitlines():
             # Skip purge lines (uninstall is FINE to list all of them).

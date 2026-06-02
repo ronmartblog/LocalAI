@@ -247,7 +247,7 @@ except ImportError:
     PIL_AVAILABLE = False
 
 APP_TITLE = "LocalAI Studio"
-APP_VERSION = "2026.06.01.10"
+APP_VERSION = "2026.06.01.11"
 
 CHAT_RESPONSE_TOKEN_MAX = 131072
 CHAT_RESPONSE_TOKEN_ONNX_FALLBACK = 4096
@@ -11233,10 +11233,9 @@ class App(ctk.CTk):
                 frame,
                 text=(
                     "How to fix:\n"
-                    " \u2022 Close this app, then run setup.bat again. "
-                    "For a transcript that survives the auto-close, right-click "
-                    "setup.ps1 and choose \u201cRun with PowerShell\u201d \u2014 "
-                    "it writes setup.log next to the app.\n"
+                    " \u2022 Close this app, then double-click setup.bat "
+                    "again. It now auto-captures everything to setup.log "
+                    "next to the app — share that file if you need help.\n"
                     " \u2022 If GPU acceleration is missing on an NVIDIA box, "
                     "run fix_nvidia_pytorch.bat (or re-run setup.bat and answer "
                     "\u201cy\u201d when prompted)."

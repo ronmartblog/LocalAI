@@ -35,7 +35,7 @@ REQUIRED_BAT_ENV_LINES = (
 
 
 REQUIRED_BAT_FILES = (
-    "setup.bat",
+    "setup1.bat",
     "run.bat",
     "fix_nvidia_pytorch.bat",
     "fix_directml_pytorch.bat",
@@ -81,7 +81,7 @@ class CacheRedirectionContractTests(unittest.TestCase):
             )
 
     def test_setup_bat_has_cache_block(self):
-        self._assert_env_block_present_in_order("setup.bat")
+        self._assert_env_block_present_in_order("setup1.bat")
 
     def test_run_bat_has_cache_block(self):
         self._assert_env_block_present_in_order("run.bat")
@@ -101,14 +101,14 @@ class CacheRedirectionContractTests(unittest.TestCase):
     # ── ordering: block must precede the first pip / python invocation ──
 
     def test_setup_bat_env_block_precedes_first_pip_install(self):
-        text = self._read("setup.bat")
+        text = self._read("setup1.bat")
         first_env = text.find('set "PIP_CACHE_DIR=%~dp0.cache')
         first_pip = text.find("pip install")
         self.assertGreater(first_env, 0)
         self.assertGreater(first_pip, 0)
         self.assertLess(
             first_env, first_pip,
-            "setup.bat: PIP_CACHE_DIR redirect must appear before the first "
+            "setup1.bat: PIP_CACHE_DIR redirect must appear before the first "
             "pip install call",
         )
 
@@ -150,12 +150,12 @@ class CacheRedirectionContractTests(unittest.TestCase):
     # ── mkdir guards: each cache dir is created before use ──────────────
 
     def test_setup_bat_creates_cache_dirs_before_use(self):
-        text = self._read("setup.bat")
+        text = self._read("setup1.bat")
         for sub in ("pip", "tmp", "huggingface", "torch"):
             pat = re.compile(rf"mkdir\s+\"%~dp0\.cache\\{sub}", re.IGNORECASE)
             self.assertIsNotNone(
                 pat.search(text),
-                f"setup.bat: missing mkdir guard for .cache\\{sub}",
+                f"setup1.bat: missing mkdir guard for .cache\\{sub}",
             )
 
     # ── shell scripts (macOS / Linux) ───────────────────────────────────
