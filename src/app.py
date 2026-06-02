@@ -247,7 +247,7 @@ except ImportError:
     PIL_AVAILABLE = False
 
 APP_TITLE = "LocalAI Studio"
-APP_VERSION = "2026.06.01.9"
+APP_VERSION = "2026.06.01.10"
 
 CHAT_RESPONSE_TOKEN_MAX = 131072
 CHAT_RESPONSE_TOKEN_ONNX_FALLBACK = 4096
@@ -1079,6 +1079,21 @@ class App(ctk.CTk):
         self._img_summary_banner = None
         self._img_summary_banner_lbl = None
         self._img_summary_banner_switch = None
+        # v2026.06.01.10: in-app "incomplete setup" warning banner. Created
+        # by _build_setup_warning_banner() inside _build_ui(); hidden by
+        # default. _refresh_setup_banner() shows/hides it when async
+        # startup checks (Ollama probe, GPU detection, ComfyUI install
+        # probe) complete with a result that suggests setup.bat did not
+        # finish successfully (e.g. setup window auto-closed on the user
+        # before they noticed an error).
+        self._setup_warning_banner = None
+        self._setup_warning_label = None
+        self._setup_warning_button = None
+        # v2026.06.01.10: cached signal for the banner check. Set by the
+        # GPU detection callback when an NVIDIA GPU is present but torch
+        # is CPU-only / missing — the exact "setup.bat skipped CUDA"
+        # signal we need without re-probing GPU each banner refresh.
+        self._pytorch_cuda_missing_on_nvidia: bool = False
         # v5: token-batching buffer for chat streaming
         self._token_buf: list[tuple[int, str]] = []
         self._token_flush_scheduled: bool = False
@@ -1186,6 +1201,22 @@ class App(ctk.CTk):
         self.gpu_info = gpu_info
         self._gpu_detection_pending = False
         self._comfyui_force_cpu = gpu_info.gpu_type == "cpu"
+        # v2026.06.01.10: cache the "NVIDIA card present but torch is CPU-only"
+        # signal here (cheap probe — gpu_detect already loaded everything it
+        # needs during detect_gpu_cached). The setup-warning banner reads
+        # this flag without re-running GPU detection on every refresh.
+        try:
+            from src import gpu_detect as _gd
+            nvidia_name = _gd._nvidia_gpu_present()
+            if nvidia_name:
+                torch_state, _ = _gd._torch_cuda_state()
+                self._pytorch_cuda_missing_on_nvidia = (
+                    torch_state in ("cpu_wheel", "missing")
+                )
+            else:
+                self._pytorch_cuda_missing_on_nvidia = False
+        except Exception:
+            self._pytorch_cuda_missing_on_nvidia = False
         # v5.5.12: Detect Windows-integrated GPU (subject to DXGI TDR).
         # Cached here once because system_info.get_gpu_info() touches WMI and
         # _populate_image_model_menu can fire repeatedly on ComfyUI restarts.
@@ -1223,6 +1254,10 @@ class App(ctk.CTk):
         self._refresh_bench_profile_values(preserve_selection=True)
         if hasattr(self, "_img_ready_lbl"):
             self._refresh_image_readiness()
+        # v2026.06.01.10: GPU result may newly satisfy / break the "PyTorch
+        # is CPU-only on an NVIDIA box" condition — refresh the in-app
+        # incomplete-setup banner so the warning appears (or clears).
+        self._refresh_setup_warning_banner()
 
     def _load_startup_data_async(self):
         """Load user-editable SKU/catalog files after the first window is visible."""
@@ -1465,8 +1500,15 @@ class App(ctk.CTk):
         # Content area
         self._content = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self._content.grid(row=0, column=1, sticky="nsew", padx=0, pady=0)
-        self._content.grid_rowconfigure(0, weight=1)
+        # v2026.06.01.10: row 0 is reserved for the optional incomplete-setup
+        # banner (hidden by default; shows when setup.bat failed silently and
+        # the user has no idea their install is broken). Pages live in row 1
+        # so banner appears ABOVE every page without per-page coordination.
+        self._content.grid_rowconfigure(0, weight=0)
+        self._content.grid_rowconfigure(1, weight=1)
         self._content.grid_columnconfigure(0, weight=1)
+
+        self._build_setup_warning_banner()
 
         # Pages — v5: lazy-loaded. Only Models is built eagerly so the app
         # opens to a populated landing screen. The rest build on first switch.
@@ -1500,6 +1542,14 @@ class App(ctk.CTk):
         self._progress_bar.grid_remove()  # hidden until needed
 
         self._switch_page("home")
+        # v2026.06.01.10: restore the incomplete-setup banner after a theme
+        # rebuild wipes & rebuilds every widget. First-run case is a no-op
+        # because async startup checks haven't completed yet — the banner
+        # will appear on its own when those callbacks fire.
+        try:
+            self._refresh_setup_warning_banner()
+        except Exception:
+            pass
 
     def _rebuild_ui_for_theme_change(self, page: str) -> None:
         """Recreate widgets so explicit Light/Dark palette changes apply immediately."""
@@ -1520,6 +1570,9 @@ class App(ctk.CTk):
         self._img_summary_banner = None
         self._img_summary_banner_lbl = None
         self._img_summary_banner_switch = None
+        self._setup_warning_banner = None
+        self._setup_warning_label = None
+        self._setup_warning_button = None
         self._chat_model_menu = None
         self._chat_load_btn = None
         self._log_box = None
@@ -10959,7 +11012,12 @@ class App(ctk.CTk):
         self._current_page = page
         for name, frame in self._pages.items():
             frame.grid_remove()
-        self._pages[page].grid(row=0, column=0, sticky="nsew")
+        # v2026.06.01.10: pages live in row=1 of self._content because
+        # the optional incomplete-setup banner occupies row=0. The banner
+        # is hidden by default and only shows when _refresh_setup_banner()
+        # detects a broken install (missing Ollama / ComfyUI / CUDA torch
+        # on an NVIDIA box). Page content auto-shifts down when it shows.
+        self._pages[page].grid(row=1, column=0, sticky="nsew")
 
         for name, btn in self._nav_btns.items():
             active = name == page
@@ -10983,6 +11041,216 @@ class App(ctk.CTk):
             self._update_system_page()
         elif page == "logs":
             self._refresh_logs()
+
+    # ── Incomplete-setup banner (v2026.06.01.10) ──────────────────────────────
+    #
+    # When setup.bat fails silently (e.g. window auto-closed before user saw
+    # the error, or user clicked through prompts without noticing CUDA wasn't
+    # installed on their NVIDIA box), the app launches into a degraded state:
+    # no Ollama, no ComfyUI, CPU-only torch. Today this is logged as quiet
+    # WARNING lines nobody reads. The banner below makes it loud and visible:
+    # a yellow strip at the top of every page that lists what's broken, with
+    # a button that opens a modal with re-run-setup guidance.
+    #
+    # Detection signals (all "best effort" — never raise to the UI thread):
+    #   1. self.ollama_ok is False after _check_ollama_async finishes
+    #   2. self._comfyui_installed_path() is None (ComfyUI absent on disk)
+    #   3. self._pytorch_cuda_missing_on_nvidia is True (NVIDIA + CPU torch)
+    #
+    # Refresh hook points (where we call self._refresh_setup_warning_banner):
+    #   - End of _apply_gpu_detection_result (sets the NVIDIA-CPU flag)
+    #   - End of _check_ollama_async (sets self.ollama_ok)
+    #   - End of _try_start_ollama (may flip self.ollama_ok)
+
+    def _build_setup_warning_banner(self) -> None:
+        """Create the incomplete-setup warning banner.
+
+        Banner is constructed once inside ``self._content`` at row=0 and
+        kept hidden via ``grid_remove()`` until
+        :meth:`_refresh_setup_warning_banner` detects a broken-install
+        signal. Page widgets live at row=1 so they auto-shift down when
+        the banner shows. Safe to call before any async startup check
+        completes — banner stays hidden until there is something to say.
+        """
+        try:
+            container = ctk.CTkFrame(
+                self._content,
+                corner_radius=0,
+                fg_color=("#fff4ce", "#3a2f0d"),
+                border_width=1,
+                border_color=WARN_TEXT,
+            )
+            container.grid(row=0, column=0, sticky="ew")
+            container.grid_columnconfigure(1, weight=1)
+            container.grid_remove()
+
+            icon = ctk.CTkLabel(
+                container,
+                text="⚠",
+                text_color=WARN_TEXT,
+                font=ctk.CTkFont(size=18, weight="bold"),
+            )
+            icon.grid(row=0, column=0, padx=(14, 8), pady=8, sticky="w")
+
+            label = ctk.CTkLabel(
+                container,
+                text="",
+                text_color=WARN_TEXT,
+                anchor="w",
+                justify="left",
+                wraplength=900,
+            )
+            label.grid(row=0, column=1, padx=(0, 12), pady=8, sticky="ew")
+
+            details_btn = ctk.CTkButton(
+                container,
+                text="Show details",
+                width=120,
+                command=self._show_setup_warning_details,
+            )
+            details_btn.grid(row=0, column=2, padx=(0, 14), pady=8, sticky="e")
+
+            self._setup_warning_banner = container
+            self._setup_warning_label = label
+            self._setup_warning_button = details_btn
+        except Exception as exc:
+            # The banner is purely advisory — never let a UI build error
+            # block the app from launching.
+            logger.debug(f"Incomplete-setup banner build failed: {exc}")
+            self._setup_warning_banner = None
+            self._setup_warning_label = None
+            self._setup_warning_button = None
+
+    def _detect_incomplete_setup_state(self) -> list[str]:
+        """Return a list of human-readable issues, empty when setup is OK.
+
+        Each entry is a short sentence ready to display in the banner /
+        details modal. Order matters — Ollama first because users hit it
+        first; ComfyUI second (image gen); GPU acceleration third
+        (performance, not correctness).
+        """
+        issues: list[str] = []
+        try:
+            if not getattr(self, "ollama_ok", False):
+                issues.append(
+                    "Ollama isn't installed or isn't running — chat, vision, "
+                    "and embedding models will not work."
+                )
+        except Exception:
+            pass
+        try:
+            if self._comfyui_installed_path() is None:
+                issues.append(
+                    "ComfyUI isn't installed — image generation is unavailable."
+                )
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_pytorch_cuda_missing_on_nvidia", False):
+                issues.append(
+                    "An NVIDIA GPU is present but PyTorch is CPU-only — image "
+                    "generation will run on the CPU (very slow). Re-run setup "
+                    "to install CUDA PyTorch."
+                )
+        except Exception:
+            pass
+        return issues
+
+    def _refresh_setup_warning_banner(self) -> None:
+        """Show or hide the banner based on current setup-state detection.
+
+        Idempotent — safe to call repeatedly from any async completion
+        hook. Quietly no-ops if the banner widget hasn't been built yet
+        (e.g. during early startup before _build_ui finishes) or has
+        been destroyed by a theme rebuild.
+        """
+        banner = getattr(self, "_setup_warning_banner", None)
+        label = getattr(self, "_setup_warning_label", None)
+        if banner is None or label is None:
+            return
+        try:
+            if not banner.winfo_exists():
+                return
+        except Exception:
+            return
+
+        issues = self._detect_incomplete_setup_state()
+        if not issues:
+            try:
+                banner.grid_remove()
+            except Exception:
+                pass
+            return
+
+        if len(issues) == 1:
+            summary = "Setup looks incomplete: " + issues[0]
+        else:
+            summary = (
+                f"Setup looks incomplete ({len(issues)} issues) — "
+                "click \u201cShow details\u201d for the full list and how to fix."
+            )
+        try:
+            label.configure(text=summary)
+            banner.grid()
+        except Exception:
+            pass
+
+    def _show_setup_warning_details(self) -> None:
+        """Open a modal listing all detected issues + remediation steps."""
+        try:
+            issues = self._detect_incomplete_setup_state()
+            if not issues:
+                return
+
+            top = ctk.CTkToplevel(self)
+            top.title("Incomplete setup detected")
+            top.transient(self)
+            top.geometry("640x420")
+            try:
+                top.grab_set()
+            except Exception:
+                pass
+
+            frame = ctk.CTkFrame(top, corner_radius=0, fg_color="transparent")
+            frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+            header = ctk.CTkLabel(
+                frame,
+                text="The app started, but the install isn't complete.",
+                font=ctk.CTkFont(size=15, weight="bold"),
+                anchor="w",
+                justify="left",
+            )
+            header.pack(anchor="w", pady=(0, 12))
+
+            issues_box = ctk.CTkTextbox(frame, height=180, wrap="word")
+            issues_box.pack(fill="both", expand=True)
+            for i, msg in enumerate(issues, 1):
+                issues_box.insert("end", f"{i}. {msg}\n\n")
+            issues_box.configure(state="disabled")
+
+            hint = ctk.CTkLabel(
+                frame,
+                text=(
+                    "How to fix:\n"
+                    " \u2022 Close this app, then run setup.bat again. "
+                    "For a transcript that survives the auto-close, right-click "
+                    "setup.ps1 and choose \u201cRun with PowerShell\u201d \u2014 "
+                    "it writes setup.log next to the app.\n"
+                    " \u2022 If GPU acceleration is missing on an NVIDIA box, "
+                    "run fix_nvidia_pytorch.bat (or re-run setup.bat and answer "
+                    "\u201cy\u201d when prompted)."
+                ),
+                anchor="w",
+                justify="left",
+                wraplength=600,
+            )
+            hint.pack(anchor="w", pady=(12, 12))
+
+            btn = ctk.CTkButton(frame, text="Close", width=120, command=top.destroy)
+            btn.pack(anchor="e")
+        except Exception as exc:
+            logger.debug(f"Incomplete-setup details dialog failed: {exc}")
 
     # ── Ollama management ─────────────────────────────────────────────────────
 
@@ -11008,6 +11276,10 @@ class App(ctk.CTk):
                         text_color=TEXT_MUTED
                     ))
                     logger.warning("Ollama is not running. Download it from https://ollama.com")
+            # v2026.06.01.10: refresh the in-app incomplete-setup banner
+            # whenever the Ollama probe completes. self.ollama_ok is now
+            # authoritative, so banner can show/hide accordingly.
+            self.after(0, self._refresh_setup_warning_banner)
 
         threading.Thread(target=_check, daemon=True).start()
 
@@ -11038,6 +11310,9 @@ class App(ctk.CTk):
                     text="Ollama not installed.\nGet it at ollama.com", text_color=TEXT_MUTED
                 ))
                 logger.warning("Ollama executable not found. Download from https://ollama.com")
+            # v2026.06.01.10: refresh the incomplete-setup banner after the
+            # auto-start attempt finishes — self.ollama_ok may have flipped.
+            self.after(0, self._refresh_setup_warning_banner)
         threading.Thread(target=_start, daemon=True).start()
 
     # ── ComfyUI management ────────────────────────────────────────────────────
@@ -17516,6 +17791,14 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
                 text="Ready: enter a prompt, then Generate.",
                 text_color=SUCCESS_TEXT,
             )
+        # v2026.06.01.10: image-readiness can transition when ComfyUI is
+        # newly installed (which is exactly when we want to clear the
+        # "ComfyUI not installed" entry from the incomplete-setup banner).
+        # Refresh here so post-install completion drives the banner.
+        try:
+            self._refresh_setup_warning_banner()
+        except Exception:
+            pass
 
     def _mark_comfyui_deferred_after_vision(self) -> None:
         self._vision_comfyui_deferred_restart = True

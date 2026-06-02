@@ -5562,5 +5562,158 @@ class ImageGenAutoPullContractTests(unittest.TestCase):
         self.assertIn(".exists()", src)
 
 
+class IncompleteSetupBannerContractTests(unittest.TestCase):
+    """v2026.06.01.10 — pin the in-app incomplete-setup banner so a
+    silently-failed install (setup.bat auto-closed, CUDA not installed,
+    Ollama not installed) surfaces a visible warning at the top of every
+    page instead of only quiet log lines.
+    """
+
+    def _function_source(self, name: str) -> str:
+        tree = ast.parse(APP_TEXT)
+        lines = APP_TEXT.splitlines()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return "\n".join(lines[node.lineno - 1: node.end_lineno])
+        self.fail(f"{name} not found")
+
+    def test_required_banner_methods_exist(self):
+        """All four banner helpers must exist: build, detect, refresh, details."""
+        for name in (
+            "_build_setup_warning_banner",
+            "_detect_incomplete_setup_state",
+            "_refresh_setup_warning_banner",
+            "_show_setup_warning_details",
+        ):
+            with self.subTest(method=name):
+                self.assertIn(f"def {name}(", APP_TEXT,
+                              f"{name} must exist as the v.10 banner contract.")
+
+    def test_detect_incomplete_setup_state_checks_all_three_signals(self):
+        """Detection must cover: missing Ollama, missing ComfyUI, and
+        NVIDIA-but-CPU-torch — the three broken-install signatures we
+        get from the v2026.06.01.9 / .10 startup probes."""
+        src = self._function_source("_detect_incomplete_setup_state")
+        self.assertIn("ollama_ok", src,
+                      "Banner must check self.ollama_ok for the Ollama signal.")
+        self.assertIn("_comfyui_installed_path", src,
+                      "Banner must check ComfyUI install status.")
+        self.assertIn("_pytorch_cuda_missing_on_nvidia", src,
+                      "Banner must check the cached NVIDIA+CPU-torch flag.")
+
+    def test_apply_gpu_detection_sets_nvidia_cpu_torch_flag(self):
+        """The NVIDIA+CPU-torch signal must be set during GPU detection
+        so the banner doesn't re-probe nvidia-smi on every refresh."""
+        src = self._function_source("_apply_gpu_detection_result")
+        self.assertIn("_pytorch_cuda_missing_on_nvidia", src,
+                      "_apply_gpu_detection_result must set the cached flag.")
+        self.assertIn("_nvidia_gpu_present", src)
+        self.assertIn("_torch_cuda_state", src)
+
+    def test_async_completion_hooks_refresh_banner(self):
+        """Banner must be refreshed after each async startup check that
+        can change its state: GPU detection, Ollama probe, Ollama
+        auto-start, and image-readiness (which fires on ComfyUI install)."""
+        for fn_name in (
+            "_apply_gpu_detection_result",
+            "_check_ollama_async",
+            "_try_start_ollama",
+            "_refresh_image_readiness",
+        ):
+            with self.subTest(function=fn_name):
+                src = self._function_source(fn_name)
+                self.assertIn("_refresh_setup_warning_banner", src,
+                              f"{fn_name} must refresh the incomplete-setup "
+                              "banner on completion.")
+
+    def test_build_ui_creates_banner_in_content_row_zero(self):
+        """_build_ui must construct the banner inside self._content at
+        row=0 and reserve row=1 for the active page."""
+        src = self._function_source("_build_ui")
+        self.assertIn("_build_setup_warning_banner", src,
+                      "_build_ui must invoke _build_setup_warning_banner.")
+        # Content area must give row 0 weight 0 (banner) and row 1 weight 1
+        # (page) so banner is fixed-height and page takes remaining space.
+        self.assertIn("self._content.grid_rowconfigure(0, weight=0)", src)
+        self.assertIn("self._content.grid_rowconfigure(1, weight=1)", src)
+
+    def test_switch_page_grids_pages_at_row_one(self):
+        """Pages must grid at row=1 (not row=0) so the banner at row=0
+        appears above them when it's shown."""
+        src = self._function_source("_switch_page")
+        self.assertIn('self._pages[page].grid(row=1, column=0, sticky="nsew")',
+                      src,
+                      "_switch_page must grid pages at row=1 so the banner "
+                      "at row=0 appears above them.")
+
+    def test_refresh_setup_warning_banner_is_idempotent_against_missing_widget(self):
+        """Banner refresh must no-op when banner widget hasn't been built
+        yet (early startup) or has been destroyed (theme rebuild) — the
+        async callbacks fire from many code paths and must never raise."""
+        src = self._function_source("_refresh_setup_warning_banner")
+        # Must check the attribute exists with a default fallback.
+        self.assertIn("getattr", src)
+        self.assertIn("_setup_warning_banner", src)
+        # Must early-return on missing widget instead of raising.
+        self.assertIn("return", src)
+
+
+class SetupPs1WrapperContractTests(unittest.TestCase):
+    """v2026.06.01.10 — pin the setup.ps1 PowerShell wrapper contract so
+    setup output is captured to setup.log even when the cmd window
+    auto-closes before the user can see what happened. setup.ps1 lives
+    OUTSIDE the cmd process so it does NOT trigger the v.4-era
+    self-tee regression that broke ``set /p`` prompts.
+    """
+
+    SETUP_PS1 = ROOT / "setup.ps1"
+    SETUP_BAT = ROOT / "setup.bat"
+
+    def test_setup_ps1_exists_next_to_setup_bat(self):
+        self.assertTrue(self.SETUP_PS1.is_file(),
+                        "setup.ps1 must exist next to setup.bat — it's the "
+                        "Fix A wrapper that captures setup.log diagnostics.")
+
+    def test_setup_ps1_uses_start_transcript_to_write_setup_log(self):
+        text = self.SETUP_PS1.read_text(encoding="utf-8")
+        self.assertIn("Start-Transcript", text,
+                      "setup.ps1 must use Start-Transcript to capture "
+                      "everything the setup console prints.")
+        self.assertIn("setup.log", text,
+                      "Transcript target must be setup.log — run.bat's "
+                      "crash-path message tells users to look for that file.")
+
+    def test_setup_ps1_has_unconditional_pause_at_end(self):
+        """Even if setup.bat hits an early-exit path that skips its own
+        pause, the PowerShell wrapper must hold the window open."""
+        text = self.SETUP_PS1.read_text(encoding="utf-8")
+        self.assertIn("Read-Host", text,
+                      "setup.ps1 must call Read-Host to pause for the user "
+                      "before closing the window.")
+
+    def test_setup_ps1_does_not_modify_setup_bat(self):
+        """setup.ps1 must NOT introduce an in-bat tee — the v.4 tee
+        regression broke ``set /p`` prompts via block buffering."""
+        text = self.SETUP_PS1.read_text(encoding="utf-8")
+        # Wrapper must invoke setup.bat as an external command, not edit it.
+        self.assertIn("setup.bat", text,
+                      "setup.ps1 must reference setup.bat by name.")
+        # And it must NOT pipe cmd's stdout through Tee-Object (that's the
+        # forbidden pattern). Start-Transcript captures from the host
+        # console, which sidesteps the buffering issue.
+        self.assertNotIn("Tee-Object", text,
+                         "setup.ps1 must not pipe cmd's stdout through "
+                         "Tee-Object — that's the forbidden v.4 pattern.")
+
+    def test_setup_bat_remains_unwrapped(self):
+        """Sanity check: setup.bat itself must NOT have been quietly
+        re-tee'd as part of v.10. The PowerShell wrapper is the only
+        capture mechanism."""
+        text = self.SETUP_BAT.read_text(encoding="utf-8")
+        # The v.4 self-tee key tokens must NOT have come back.
+        self.assertNotIn("LOCALAI_SETUP_TEED", text)
+        self.assertNotIn("Tee-Object", text)
+
+
 if __name__ == "__main__":
     unittest.main()

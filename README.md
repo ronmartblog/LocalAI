@@ -51,6 +51,15 @@ setup.bat
 run.bat
 ```
 
+> 💡 **Recommended for setup diagnostics:** right-click `setup.ps1` and
+> choose **"Run with PowerShell"** instead of double-clicking `setup.bat`.
+> The PowerShell wrapper captures everything the installer prints to
+> `setup.log` next to the script (and always pauses at the end), so when
+> something goes wrong you have a complete record to share rather than a
+> console window that flashed past too fast to read. `setup.ps1` runs the
+> exact same `setup.bat` — it just adds the transcript and the
+> guaranteed pause.
+
 The first-run setup detects your hardware (CPU only, NVIDIA GPU, or
 AMD/Intel GPU) and installs an appropriate PyTorch wheel + ComfyUI
 alongside the app. See [docs/architecture.md](docs/architecture.md)
