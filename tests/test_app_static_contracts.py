@@ -5817,5 +5817,97 @@ class SetupPs1WrapperContractTests(unittest.TestCase):
             )
 
 
+class BenchmarkRetryFailedUnpackContractTests(unittest.TestCase):
+    """Regression pin for the v2026.06.02.0 small-CPU-box crash:
+
+        File "C:\\LocalAI\\src\\app.py", line 10040, in _retry_failed_benchmark
+            for mid, method in failed:
+        ValueError: too many values to unpack (expected 2)
+
+    ``BatchReport.get_failed_combos()`` returns
+    ``list[tuple[str, str, int]]`` — (model_id, method, sample_index) —
+    since v5.5.6+ (sample-index sharding was added when image-gen
+    benchmarks started supporting multiple sample prompts per row).
+    The Retry-Failed UI loop in ``_retry_failed_benchmark`` still
+    unpacked the iterable into 2 variables, which is fine for an empty
+    or single-sample failure list but crashes the moment any failure
+    row carries a sample index.
+
+    BatchRunner already handles 3-tuples defensively (uses
+    ``combo[0]`` / ``combo[1]`` / ``combo[2]`` indexing in
+    ``_methods_for`` and ``_iter_selected_samples_for``), so the bug
+    was confined to the app-side logging loop.
+
+    These contracts pin both the producer (3-tuple return type) and
+    the consumer (no 2-tuple unpack) so the schema can't drift again.
+    """
+
+    def _function_source(self, name: str) -> str:
+        tree = ast.parse(APP_TEXT)
+        lines = APP_TEXT.splitlines()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return "\n".join(lines[node.lineno - 1: node.end_lineno])
+        self.fail(f"{name} not found in src/app.py")
+
+    def test_get_failed_combos_returns_three_tuples(self):
+        """The producer side: BatchReport.get_failed_combos() must
+        return ``(model_id, method, sample_index)`` triples."""
+        report_text = (ROOT / "src" / "batch_report.py").read_text(encoding="utf-8")
+        tree = ast.parse(report_text)
+        found = False
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.FunctionDef)
+                and node.name == "get_failed_combos"
+            ):
+                found = True
+                ann = ast.unparse(node.returns) if node.returns else ""
+                self.assertIn(
+                    "tuple[str,str,int]", ann.replace(" ", ""),
+                    "get_failed_combos must be annotated as returning "
+                    "list[tuple[str, str, int]] so the consumer side "
+                    "can rely on the 3-element shape.",
+                )
+        self.assertTrue(
+            found,
+            "BatchReport.get_failed_combos must exist in src/batch_report.py",
+        )
+
+    def test_retry_failed_benchmark_does_not_unpack_two_tuple(self):
+        """The consumer side: _retry_failed_benchmark must NOT contain
+        a ``for mid, method in failed:`` loop. The failure list yields
+        3-tuples (model_id, method, sample_index); unpacking into 2
+        variables raises ``ValueError: too many values to unpack``."""
+        src = self._function_source("_retry_failed_benchmark")
+        self.assertNotIn(
+            "for mid, method in failed:",
+            src,
+            "_retry_failed_benchmark cannot unpack 'failed' into 2 "
+            "variables — get_failed_combos returns 3-tuples and the "
+            "loop crashes the moment any failure row carries a sample "
+            "index. Use index access (combo[0], combo[1], combo[2]) "
+            "or unpack into 3 variables instead.",
+        )
+
+    def test_retry_failed_benchmark_logs_each_failed_combo(self):
+        """Whatever shape the loop uses, _retry_failed_benchmark must
+        still log every failed combo in the Retry preamble so the user
+        sees what's about to be re-run."""
+        src = self._function_source("_retry_failed_benchmark")
+        self.assertIn(
+            "_bench_log_append",
+            src,
+            "_retry_failed_benchmark must call _bench_log_append to "
+            "show the user what's being retried.",
+        )
+        self.assertIn(
+            "failed",
+            src,
+            "_retry_failed_benchmark must reference the 'failed' list "
+            "from get_failed_combos.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10037,8 +10037,18 @@ class App(ctk.CTk):
             f"Benchmark profile: {self._bench_capacity_label(capacity)}\n"
             f"Retrying {len(failed)} failed test(s) from:\n{json_path}\n"
         )
-        for mid, method in failed:
-            self._bench_log_append(f"  {mid} / {method}\n")
+        for combo in failed:
+            # get_failed_combos returns (model_id, method, sample_index) since
+            # v5.5.6. Include sample_index in the log only when there is more
+            # than one sample (>0) so per-sample reruns are visible while
+            # single-sample combos stay terse.
+            mid = combo[0]
+            method = combo[1]
+            sample_idx = combo[2] if len(combo) >= 3 else 0
+            if sample_idx:
+                self._bench_log_append(f"  {mid} / {method} (sample {sample_idx})\n")
+            else:
+                self._bench_log_append(f"  {mid} / {method}\n")
         self._bench_log_append("\n")
         self.set_status(f"Retrying {len(failed)} failed benchmark(s) ...")
 
