@@ -1,0 +1,321 @@
+{
+  "_readme": "LocalAI Studio optional SKU profile definitions. Each entry describes one hardware class (cloud VM, bare-metal workstation, etc.). Required fields: name (unique display name used in the SKU filter), vram_gb (GPU VRAM in GiB, 0 for CPU-only). Optional fields: vm_size_pattern (cloud VM size string or pattern with # = one digit, ? = one character, * = any characters; accepts a list of patterns too), cpu (CPU/vCPU count), ram_gb, gpu_fraction (human-readable GPU share, e.g. '1/6 GPU'), bench_quick_models / bench_extended_models (per-SKU benchmark default-tick model lists with optional {inherit, add, remove} against bench_defaults.baselines), recommended_models (model ids surfaced as 'Recommended for: <SKU>' badges on the Models page and used to auto-tick the Recommended preset in Benchmark and Image Gen). SKUs must be listed in ascending capability order. Reload via Settings > Reload SKUs (no restart). This file is the SINGLE source of truth for SKU display names and SKU->model recommendations — the app must never hardcode them. Legacy field names azure_size and vcpu are still accepted by the loader for back-compat.",
+  "version": 3,
+  "feature": {
+    "enabled_label": "W365",
+    "device_label": "Cloud PC",
+    "detecting_text": "Cloud PC: detecting …",
+    "not_detected_text": "Cloud PC: not detected",
+    "banner_label": "Cloud PC:",
+    "filter_label": "W365 SKU filter:",
+    "all_filter_value": "All SKUs",
+    "settings_title": "W365 GPU SKUs",
+    "reload_button": "Reload W365 SKUs",
+    "open_button": "Open SKU File",
+    "compatibility_prefix": "W365 compatible:",
+    "requires_more_text": "W365: requires more VRAM than any known SKU"
+  },
+  "bench_defaults": {
+    "_readme": "Per-SKU default-tick model sets for the Benchmark page Quick/Extended modes. Each SKU's bench_quick_models / bench_extended_models is either a flat array of model ids or an object {inherit: <baseline name OR list of names>, add: [...], remove: [...]} resolved against the named baselines below. Empty / missing means no defaults for that SKU (UI shows fits-but-unticked). Quick is the calibrated lean smoke set; Extended is the full set of verified passers per SKU and its numbers must match actual passing benchmark runs at C:\\Users\\ronmart\\OneDrive - Microsoft\\Public\\Hackathon\\Results — see AGENTS.md 'benchmark defaults' row. Baselines: `quick_chat_ultra_small` (only models with `category: 'Ultra Small'` in src/catalog.py — pinned by `tests/test_skus.py::QuickChatUltraSmallBaselineContractTests`), `quick_image_smallest` (the single smallest reliable image-gen model, 4 GB VRAM) — added in v2026.06.01.6 to make Quick a true sub-3-minute smoke test on every SKU. Extensibility: per-SKU `add` arrays let maintainers opt a SKU into extras WITHOUT changing the lean baselines — e.g. a high-VRAM workstation SKU may opt into `z-image-turbo` or `playgroundai-playground-v2.5-1024px-aesthetic`; per-SKU `remove` arrays exclude specific models. New named baselines may be added here and composed via the `inherit` array.",
+    "baselines": {
+      "quick_chat_ultra_small": [
+        "qwen2.5:0.5b",
+        "llama3.2:1b",
+        "gemma3:1b"
+      ],
+      "quick_image_smallest": [
+        "realistic-vision-v6"
+      ],
+      "extended_chat_low": [
+        "aya-expanse:8b",
+        "deepseek-r1-1.5b",
+        "dolphin3:latest",
+        "falcon3:7b",
+        "gemma3:12b-vision",
+        "gemma3:1b",
+        "gemma3:4b-vision",
+        "granite3.1-moe:latest",
+        "granite3.3:8b",
+        "llama3.2:1b",
+        "llama3.2:3b",
+        "llama3.2-vision:11b",
+        "mistral-nemo",
+        "nemotron-3-nano:4b",
+        "nemotron-3-nano:4b-q8_0",
+        "phi4",
+        "phi4:mini",
+        "qwen2.5:0.5b",
+        "qwen2.5-coder-7b",
+        "qwen2.5vl-3b",
+        "qwen2.5vl-7b"
+      ],
+      "extended_chat_high": [
+        "aya-expanse:8b",
+        "deepseek-r1:32b",
+        "deepseek-r1-1.5b",
+        "dolphin3:latest",
+        "falcon3:7b",
+        "gemma3:12b-vision",
+        "gemma3:1b",
+        "gemma3:4b-vision",
+        "gemma3-27b",
+        "granite3.1-moe:latest",
+        "granite3.3:8b",
+        "llama3.2:1b",
+        "llama3.2:3b",
+        "llama3.2-vision:11b",
+        "llama3.3",
+        "mistral-nemo",
+        "mistral-small3.2",
+        "nemotron-3-nano:4b",
+        "nemotron-3-nano:4b-q8_0",
+        "phi4",
+        "phi4:mini",
+        "qwen2.5:0.5b",
+        "qwen2.5-coder-7b",
+        "qwen2.5vl-32b",
+        "qwen2.5vl-3b",
+        "qwen2.5vl-7b",
+        "qwen3-30b-a3b"
+      ],
+      "gpu_image_base": [
+        "bytedance-sdxl-lightning",
+        "flux1-dev-q4",
+        "flux1-schnell-q4",
+        "gsdf-counterfeit-v3.0",
+        "juggernaut-xl-v9",
+        "playgroundai-playground-v2.5-1024px-aesthetic",
+        "realistic-vision-v6",
+        "sdxl-base",
+        "z-image-turbo"
+      ]
+    }
+  },
+  "skus": [
+    {
+      "name": "4 vCPU",
+      "vm_size_pattern": "Standard_D4s_v#",
+      "cpu": 4,
+      "ram_gb": 16,
+      "vram_gb": 0,
+      "gpu_fraction": "None",
+      "bench_quick_models": {
+        "inherit": "quick_chat_ultra_small"
+      },
+      "bench_extended_models": {
+        "inherit": "extended_chat_low"
+      },
+      "recommended_models": [
+        "all-minilm",
+        "aya-expanse:8b",
+        "deepseek-r1-1.5b",
+        "dolphin3:latest",
+        "falcon3:7b",
+        "florence-2-base",
+        "gemma3:12b-vision",
+        "gemma3:1b",
+        "gemma3:4b-vision",
+        "granite3.1-moe:latest",
+        "granite3.3:8b",
+        "llama3.2-vision:11b",
+        "llama3.2:1b",
+        "llama3.2:3b",
+        "minicpm-v-vision",
+        "mistral-nemo",
+        "nemotron-3-nano:4b",
+        "nemotron-3-nano:4b-q8_0",
+        "phi-4-multimodal",
+        "phi4",
+        "phi4:mini",
+        "qwen2.5-coder-7b",
+        "qwen2.5:0.5b",
+        "qwen2.5vl-3b",
+        "qwen2.5vl-7b",
+        "speecht5-tts",
+        "trocr-base-printed",
+        "whisper-large-v3-turbo"
+      ]
+    },
+    {
+      "name": "8 vCPU",
+      "vm_size_pattern": "Standard_D8s_v#",
+      "cpu": 8,
+      "ram_gb": 32,
+      "vram_gb": 0,
+      "gpu_fraction": "None",
+      "bench_quick_models": {
+        "inherit": "quick_chat_ultra_small"
+      },
+      "bench_extended_models": {
+        "inherit": "extended_chat_low"
+      },
+      "recommended_models": []
+    },
+    {
+      "name": "16 vCPU",
+      "vm_size_pattern": "Standard_D16s_v#",
+      "cpu": 16,
+      "ram_gb": 64,
+      "vram_gb": 0,
+      "gpu_fraction": "None",
+      "bench_quick_models": {
+        "inherit": "quick_chat_ultra_small"
+      },
+      "bench_extended_models": {
+        "inherit": "extended_chat_high"
+      },
+      "recommended_models": [
+        "deepseek-r1:32b",
+        "gemma3-27b",
+        "llama3.3",
+        "mistral-small3.2",
+        "qwen2.5vl-32b",
+        "qwen3-30b-a3b"
+      ]
+    },
+    {
+      "name": "32 vCPU",
+      "vm_size_pattern": "Standard_D32s_v#",
+      "cpu": 32,
+      "ram_gb": 128,
+      "vram_gb": 0,
+      "gpu_fraction": "None",
+      "bench_quick_models": {
+        "inherit": "quick_chat_ultra_small"
+      },
+      "bench_extended_models": {
+        "inherit": "extended_chat_high"
+      },
+      "recommended_models": []
+    },
+    {
+      "name": "GPU Select",
+      "vm_size_pattern": "Standard_NV6ads_A10_v5",
+      "cpu": 6,
+      "ram_gb": 55,
+      "vram_gb": 4,
+      "gpu_fraction": "1/6 GPU",
+      "bench_quick_models": {
+        "inherit": ["quick_chat_ultra_small", "quick_image_smallest"]
+      },
+      "bench_extended_models": {
+        "inherit": "extended_chat_low",
+        "add": [
+          "qwen3-30b-a3b",
+          "realistic-vision-v6"
+        ]
+      },
+      "recommended_models": [
+        "all-minilm",
+        "aya-expanse:8b",
+        "deepseek-r1-1.5b",
+        "dolphin3:latest",
+        "falcon3:7b",
+        "florence-2-base",
+        "gemma3:12b-vision",
+        "gemma3:1b",
+        "gemma3:4b-vision",
+        "granite3.1-moe:latest",
+        "granite3.3:8b",
+        "llama3.2-vision:11b",
+        "llama3.2:1b",
+        "llama3.2:3b",
+        "minicpm-v-vision",
+        "mistral-nemo",
+        "nemotron-3-nano:4b",
+        "nemotron-3-nano:4b-q8_0",
+        "phi-4-multimodal",
+        "phi4",
+        "phi4:mini",
+        "qwen2.5-coder-7b",
+        "qwen2.5:0.5b",
+        "qwen2.5vl-3b",
+        "qwen2.5vl-7b",
+        "qwen3-30b-a3b",
+        "realistic-vision-v6",
+        "sdxl-lowvram",
+        "speecht5-tts",
+        "table-transformer",
+        "trocr-base-printed",
+        "trocr-large-printed",
+        "whisper-large-v3-turbo",
+        "whisper-v3-turbo-gpu"
+      ]
+    },
+    {
+      "name": "GPU Standard",
+      "vm_size_pattern": "Standard_NV12ads_A10_v5",
+      "cpu": 12,
+      "ram_gb": 110,
+      "vram_gb": 8,
+      "gpu_fraction": "1/3 GPU",
+      "bench_quick_models": {
+        "inherit": ["quick_chat_ultra_small", "quick_image_smallest"]
+      },
+      "bench_extended_models": {
+        "inherit": [
+          "extended_chat_high",
+          "gpu_image_base"
+        ]
+      },
+      "recommended_models": [
+        "bytedance-sdxl-lightning",
+        "deepseek-r1:32b",
+        "flux1-dev-q4",
+        "flux1-schnell-q4",
+        "gemma3-27b",
+        "gsdf-counterfeit-v3.0",
+        "juggernaut-xl-v9",
+        "llama3.3",
+        "mistral-small3.2",
+        "playgroundai-playground-v2.5-1024px-aesthetic",
+        "qwen2.5vl-32b",
+        "sdxl-base",
+        "z-image-turbo"
+      ]
+    },
+    {
+      "name": "GPU Super",
+      "vm_size_pattern": "Standard_NV18ads_A10_v5",
+      "cpu": 18,
+      "ram_gb": 220,
+      "vram_gb": 12,
+      "gpu_fraction": "1/2 GPU",
+      "bench_quick_models": {
+        "inherit": ["quick_chat_ultra_small", "quick_image_smallest"]
+      },
+      "bench_extended_models": {
+        "inherit": [
+          "extended_chat_high",
+          "gpu_image_base"
+        ],
+        "add": [
+          "flux1-dev-fp16"
+        ]
+      },
+      "recommended_models": [
+        "flux1-dev-fp16"
+      ]
+    },
+    {
+      "name": "GPU Max",
+      "vm_size_pattern": "Standard_NV36ads_A10_v5",
+      "cpu": 36,
+      "ram_gb": 440,
+      "vram_gb": 24,
+      "gpu_fraction": "Full GPU",
+      "bench_quick_models": {
+        "inherit": ["quick_chat_ultra_small", "quick_image_smallest"]
+      },
+      "bench_extended_models": {
+        "inherit": [
+          "extended_chat_high",
+          "gpu_image_base"
+        ],
+        "add": [
+          "flux1-dev-fp16"
+        ]
+      },
+      "recommended_models": []
+    }  ]
+}

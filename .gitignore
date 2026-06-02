@@ -7,8 +7,11 @@
 # to the repo by other means (git add, IDE, manual copy, etc.).
 
 # ── Private SKU / configuration data ────────────────────────────────────────
-skus.json
-w365_skus.json
+# Root-level only ('/' anchor): we INTENTIONALLY ship samples/skus.json as
+# a reference example. A bare 'skus.json' here would also match
+# samples/skus.json and silently exclude it.
+/skus.json
+/w365_skus.json
 config.json
 python_path.bat
 comfyui_path.bat
