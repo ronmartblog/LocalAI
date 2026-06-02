@@ -19,16 +19,21 @@ comfyui_path.bat
 # ── Runtime logs and per-run output ─────────────────────────────────────────
 *.log
 localai.log
+setup.log
 comfyui.log
 benchmark_results/
 toolbox_outputs/
 Scratchpad/
 *.cache/
+vm_sku_detection_*.txt
+localai_benchmark_candidates.json
 
 # ── Backups and archives (never shipped to GitHub) ──────────────────────────
 Archive/
 *.bak
 *.bak.*
+*.bak2
+*.bak3
 pre-edit-backup-*/
 pre-publish-backup-*/
 pre-refimg-*/

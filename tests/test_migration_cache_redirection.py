@@ -159,21 +159,34 @@ class CacheRedirectionContractTests(unittest.TestCase):
             )
 
     # ── shell scripts (macOS / Linux) ───────────────────────────────────
+    # NOTE: setup.sh / run.sh are excluded from the public Windows-only
+    # repo (see manifest.txt + scrub_grep.ps1). These tests skip on
+    # checkouts where the file is absent, so the same suite stays green
+    # both maintainer-side (files present) and repo-side (files absent).
 
     def test_setup_sh_exports_cache_redirection(self):
-        text = (APP_ROOT / "setup.sh").read_text(encoding="utf-8")
+        path = APP_ROOT / "setup.sh"
+        if not path.exists():
+            self.skipTest("setup.sh is maintainer-only; not shipped with the public repo")
+        text = path.read_text(encoding="utf-8")
         for line in REQUIRED_SH_EXPORTS:
             self.assertIn(line, text,
                           f"setup.sh: missing required export {line!r}")
 
     def test_run_sh_exports_cache_redirection(self):
-        text = (APP_ROOT / "run.sh").read_text(encoding="utf-8")
+        path = APP_ROOT / "run.sh"
+        if not path.exists():
+            self.skipTest("run.sh is maintainer-only; not shipped with the public repo")
+        text = path.read_text(encoding="utf-8")
         for line in REQUIRED_SH_EXPORTS:
             self.assertIn(line, text,
                           f"run.sh: missing required export {line!r}")
 
     def test_setup_sh_makes_cache_dirs_with_mkdir_p(self):
-        text = (APP_ROOT / "setup.sh").read_text(encoding="utf-8")
+        path = APP_ROOT / "setup.sh"
+        if not path.exists():
+            self.skipTest("setup.sh is maintainer-only; not shipped with the public repo")
+        text = path.read_text(encoding="utf-8")
         # We look for a single mkdir -p line that touches the cache dirs.
         self.assertRegex(
             text,

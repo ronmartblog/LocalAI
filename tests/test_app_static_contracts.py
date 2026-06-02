@@ -3301,7 +3301,13 @@ class DocsRound3ContractTests(unittest.TestCase):
         docs = ROOT / "docs"
         cls.index = (docs / "index.html").read_text(encoding="utf-8")
         cls.image_gen = (docs / "image-gen-guide.html").read_text(encoding="utf-8")
-        cls.extension = (docs / "localai-docs-extension.js").read_text(encoding="utf-8")
+        # localai-docs-extension.js is maintainer-only (injects Windows 365
+        # Cloud PC SKU overlays into the local docs) and is intentionally
+        # excluded from the public repo per manifest.txt. Tests that read it
+        # must skip gracefully on the public-repo checkout instead of
+        # failing setUpClass for the whole test class.
+        ext_path = docs / "localai-docs-extension.js"
+        cls.extension = ext_path.read_text(encoding="utf-8") if ext_path.exists() else None
 
     def test_image_gen_guide_cfg_section_uses_table_not_divs(self):
         # The div→table migration replaces a flexbox bar that never had
@@ -3373,6 +3379,13 @@ class DocsRound3ContractTests(unittest.TestCase):
         # Both inject targets were retired — the doc now owns this content
         # natively. If the inject body grows back, the timing or hardware
         # tables would render twice in old guides.
+        # Skipped on the public-repo checkout where the maintainer-only
+        # extension file is intentionally absent (see setUpClass).
+        if self.extension is None:
+            self.skipTest(
+                "docs/localai-docs-extension.js is maintainer-only and not "
+                "present in this checkout"
+            )
         for slot_id in ("image-guide-generation-times", "model-value-hardware-profiles"):
             pattern = (
                 r'inject\(\s*["\']' + slot_id + r'["\']\s*,\s*'
