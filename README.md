@@ -40,6 +40,23 @@ See [DISCLAIMER.md](DISCLAIMER.md). The short version: it is **not** a
 product, **not** affiliated with any vendor, and **not** a substitute for
 official vendor support or guidance.
 
+## Screenshots
+
+A quick tour of what LocalAI Studio looks like in use.
+
+| | |
+|---|---|
+| ![Home](docs/screenshots/01-home.png) | **Home** — landing page with live backend status (Ollama, ComfyUI, ONNX, OpenVINO). |
+| ![Models](docs/screenshots/02-models.png) | **Models** — browse the local model catalog, filter by category, install with one click. |
+| ![Chat](docs/screenshots/03-chat.png) | **Chat** — streaming responses from any installed Ollama / ONNX / OpenVINO model. |
+| ![Image Generation](docs/screenshots/04-image-generation.png) | **Image Generation** — Stable Diffusion / SDXL / FLUX via ComfyUI, all local. |
+| ![Toolbox](docs/screenshots/05-toolbox.png) | **Toolbox** — offline workflows for transcribe, OCR, tables, speech, embeddings, and image description. |
+| ![Benchmark](docs/screenshots/06-benchmark.png) | **Benchmark** — pick models, run side-by-side, get TTFT / throughput / RAM / VRAM numbers. |
+| ![Benchmark report](docs/screenshots/07-benchmark-report.png) | **Benchmark report** — every run generates a standalone HTML report you can open in any browser. |
+| ![Docs home](docs/screenshots/08-docs-home.png) | **Docs** — built-in offline docs covering setup, models, image gen, and architecture. |
+| ![Model Guide](docs/screenshots/09-docs-model-guide.png) | **Model Guide** — per-model demo gallery, prompts, and notes. |
+| ![Image Gen Guide](docs/screenshots/10-docs-image-gen-guide.png) | **Image Gen Guide** — tips for prompts, refinements, and getting the most out of each base model. |
+
 ## Quick start
 
 ### Windows
