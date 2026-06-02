@@ -5909,5 +5909,114 @@ class BenchmarkRetryFailedUnpackContractTests(unittest.TestCase):
         )
 
 
+class BulkDeleteProgressDialogContractTests(unittest.TestCase):
+    """v2026.06.02.0 — pin the modal-progress dialog that the
+    Settings "Delete not-in-catalog Ollama tags" and
+    "Delete not-in-catalog ONNX directories" red buttons use, so they
+    can never silently freeze the UI again the way they did before
+    ``_run_bulk_with_progress`` existed.
+
+    Ron's repro from the small-CPU-box session: a multi-tag
+    ``ollama rm`` loop ran on the UI thread, blocked the mainloop for
+    ~30s per tag with zero visible feedback, and looked like the app
+    had hung. The fix centralises bulk-delete UX in
+    ``_run_bulk_with_progress`` so any future "delete N items" red
+    button gets the same modal progress dialog by default.
+    """
+
+    def _function_source(self, name: str) -> str:
+        tree = ast.parse(APP_TEXT)
+        lines = APP_TEXT.splitlines()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return "\n".join(lines[node.lineno - 1: node.end_lineno])
+        self.fail(f"{name} not found in src/app.py")
+
+    def test_run_bulk_with_progress_helper_exists(self):
+        """The shared helper that owns the modal dialog must exist."""
+        self.assertIn(
+            "def _run_bulk_with_progress(",
+            APP_TEXT,
+            "_run_bulk_with_progress must exist as the single source of "
+            "truth for bulk-delete progress UI. Without it, the Settings "
+            "red-button paths fall back to synchronous loops that freeze "
+            "the UI thread.",
+        )
+
+    def test_run_bulk_with_progress_uses_modal_dialog_and_worker_thread(self):
+        """The helper must (a) build a CTkToplevel as the modal surface,
+        (b) show a CTkProgressBar that the user can actually see advance,
+        and (c) run the per-item work_fn on a background thread so the
+        UI thread stays responsive."""
+        src = self._function_source("_run_bulk_with_progress")
+        self.assertIn(
+            "ctk.CTkToplevel(self)", src,
+            "_run_bulk_with_progress must create a CTkToplevel for the modal dialog.",
+        )
+        self.assertIn(
+            "ctk.CTkProgressBar(", src,
+            "_run_bulk_with_progress must render a CTkProgressBar so the "
+            "user sees progress instead of staring at a frozen window.",
+        )
+        self.assertIn(
+            "threading.Thread(", src,
+            "_run_bulk_with_progress must run work_fn on a background "
+            "thread — running it on the UI thread defeats the entire "
+            "point of having a progress dialog.",
+        )
+        self.assertIn(
+            "self.after(", src,
+            "Worker thread must marshal UI updates back via self.after("
+            "0, ...) — touching CTk widgets from the worker is unsafe.",
+        )
+        self.assertIn(
+            "wait_window", src,
+            "Helper must block the caller via dlg.wait_window() so the "
+            "caller's summary logic runs after the work completes.",
+        )
+
+    def test_confirm_delete_ollama_tags_uses_progress_helper(self):
+        """The Settings red button for bulk-deleting Ollama tags must
+        route through the shared progress helper instead of running its
+        own synchronous subprocess loop on the UI thread."""
+        src = self._function_source("_confirm_delete_ollama_tags")
+        self.assertIn(
+            "_run_bulk_with_progress(",
+            src,
+            "_confirm_delete_ollama_tags must call _run_bulk_with_progress "
+            "for the actual deletes — running `ollama rm` for every tag "
+            "in a tight for-loop on the UI thread is what caused the "
+            "'app froze' UX complaint in the v.13 session.",
+        )
+        # And the inline loop that used to run `ollama rm` synchronously
+        # on the UI thread must not come back.
+        self.assertNotIn(
+            'subprocess.run(\n                    ["ollama", "rm", tag]',
+            src,
+            "_confirm_delete_ollama_tags must not re-grow an inline "
+            "synchronous `ollama rm` loop on the UI thread — that's the "
+            "regression this contract pins against.",
+        )
+
+    def test_confirm_delete_onnx_dirs_uses_progress_helper(self):
+        """Same contract for the ONNX-directories red button — the
+        rmtree loop must also run through the shared progress helper."""
+        src = self._function_source("_confirm_delete_onnx_dirs")
+        self.assertIn(
+            "_run_bulk_with_progress(",
+            src,
+            "_confirm_delete_onnx_dirs must call _run_bulk_with_progress "
+            "so multi-directory deletes show progress instead of "
+            "freezing the UI.",
+        )
+        # The legacy inline rmtree loop must not come back either.
+        self.assertNotIn(
+            "for d in dirs:\n            try:\n                _shutil.rmtree(",
+            src,
+            "_confirm_delete_onnx_dirs must not re-grow an inline "
+            "synchronous rmtree loop on the UI thread.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

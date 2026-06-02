@@ -13330,6 +13330,149 @@ class App(ctk.CTk):
             )
             bulk_o.grid(row=5, column=0, sticky="w", padx=(6, 0), pady=(2, 10))
 
+    def _run_bulk_with_progress(
+        self,
+        *,
+        title: str,
+        header: str,
+        items: list,
+        work_fn,
+        item_label_fn,
+    ) -> list[tuple]:
+        """Run ``work_fn(item)`` for each item in ``items`` on a worker
+        thread while showing a modal progress dialog. Returns a list of
+        ``(item, error_str_or_None)`` tuples in input order.
+
+        Each ``work_fn`` call may raise — the exception text is captured
+        as the per-item error string. ``item_label_fn(item)`` produces the
+        short label rendered in the "Removing {label} (n/N)..." line.
+
+        Blocks the caller (via ``wait_window``) until the dialog closes;
+        the dialog auto-closes ~750 ms after success and stays open with a
+        Close button on partial/total failure or cancellation. Cancellation
+        only takes effect between items — an in-flight subprocess call
+        (e.g. ``ollama rm``) runs to its own timeout before the cancel
+        is honoured. v2026.06.02.0 — added to make
+        ``_confirm_delete_ollama_tags`` /
+        ``_confirm_delete_onnx_dirs`` show progress instead of freezing
+        the UI silently on multi-item deletes.
+        """
+        total = len(items)
+        results: list[tuple] = []
+        cancel_event = threading.Event()
+
+        dlg = ctk.CTkToplevel(self)
+        dlg.title(title)
+        dlg.transient(self)
+        try:
+            dlg.grab_set()
+        except Exception:
+            pass
+        dlg.resizable(False, False)
+        dlg.protocol("WM_DELETE_WINDOW", lambda: None)  # disable [X] while running
+
+        ctk.CTkLabel(
+            dlg, text=header, justify="left", anchor="w",
+            wraplength=460, font=ctk.CTkFont(size=12, weight="bold"),
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(16, 8))
+
+        progress = ctk.CTkProgressBar(dlg, width=440, height=14, mode="determinate")
+        progress.grid(row=1, column=0, columnspan=2, sticky="ew", padx=20, pady=(4, 4))
+        progress.set(0.0)
+
+        status_var = ctk.StringVar(value=f"Starting (0 of {total})...")
+        ctk.CTkLabel(
+            dlg, textvariable=status_var, justify="left", anchor="w",
+            wraplength=440, font=ctk.CTkFont(size=11),
+            text_color=TEXT_MUTED,
+        ).grid(row=2, column=0, columnspan=2, sticky="w", padx=20, pady=(2, 4))
+
+        summary_var = ctk.StringVar(value="")
+        ctk.CTkLabel(
+            dlg, textvariable=summary_var, justify="left", anchor="w",
+            wraplength=440, font=ctk.CTkFont(size=11),
+        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=20, pady=(0, 4))
+
+        btn_row = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_row.grid(row=4, column=0, columnspan=2, sticky="e", padx=20, pady=(8, 16))
+
+        action_btn = ctk.CTkButton(
+            btn_row, text="Cancel", width=100,
+            command=lambda: (cancel_event.set(), action_btn.configure(
+                state="disabled", text="Cancelling...",
+            )),
+        )
+        action_btn.grid(row=0, column=0)
+
+        # Centre over parent
+        try:
+            self.update_idletasks()
+            px = self.winfo_rootx()
+            py = self.winfo_rooty()
+            pw = self.winfo_width()
+            ph = self.winfo_height()
+            dlg.update_idletasks()
+            dw = dlg.winfo_reqwidth()
+            dh = dlg.winfo_reqheight()
+            dlg.geometry(f"+{px + (pw - dw) // 2}+{py + (ph - dh) // 3}")
+        except Exception:
+            pass
+
+        def _ui_update(idx: int, label: str):
+            done = idx
+            status_var.set(f"Removing {label} ({done + 1} of {total})...")
+            progress.set(done / total if total else 1.0)
+
+        def _ui_done(failures: int, cancelled: bool):
+            progress.set(1.0)
+            ok = total - failures - (total - len(results))
+            if cancelled and len(results) < total:
+                status_var.set(
+                    f"Cancelled after {len(results)} of {total}."
+                )
+            else:
+                status_var.set(f"Done — processed {len(results)} of {total}.")
+            if failures:
+                summary_var.set(
+                    f"{ok} removed, {failures} failed. See summary after closing."
+                )
+            elif cancelled:
+                summary_var.set(
+                    f"{ok} removed before cancel. Remaining items were skipped."
+                )
+            else:
+                summary_var.set(f"All {ok} item(s) removed successfully.")
+            action_btn.configure(state="normal", text="Close", command=dlg.destroy)
+            dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
+            # Auto-close on full success — give the user time to see the green.
+            if not failures and not cancelled:
+                dlg.after(750, dlg.destroy)
+
+        def _worker():
+            failures = 0
+            for idx, item in enumerate(items):
+                if cancel_event.is_set():
+                    break
+                try:
+                    self.after(0, _ui_update, idx, item_label_fn(item))
+                except Exception:
+                    pass
+                err = None
+                try:
+                    work_fn(item)
+                except Exception as exc:
+                    err = str(exc) or exc.__class__.__name__
+                    failures += 1
+                results.append((item, err))
+            try:
+                self.after(0, _ui_done, failures, cancel_event.is_set())
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+        dlg.wait_window()
+        return results
+
     def _confirm_delete_ollama_tags(self, tags: list[str]) -> None:
         """Confirm + run ``ollama rm`` on each tag in *tags*. No-op on empty input."""
         tags = [t for t in (tags or []) if isinstance(t, str) and t.strip()]
@@ -13347,27 +13490,47 @@ class App(ctk.CTk):
         )
         if not confirm:
             return
-        failures: list[str] = []
-        for tag in tags:
-            try:
-                proc = subprocess.run(
-                    ["ollama", "rm", tag],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    check=False,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+
+        def _delete_one(tag: str) -> None:
+            proc = subprocess.run(
+                ["ollama", "rm", tag],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    (proc.stderr or proc.stdout or "ollama rm failed").strip()[:160]
                 )
-                if proc.returncode != 0:
-                    failures.append(f"{tag}: {(proc.stderr or proc.stdout or '').strip()[:120]}")
-                else:
-                    logger.info(f"Deleted not-in-catalog Ollama tag: {tag}")
-            except Exception as exc:
-                failures.append(f"{tag}: {exc}")
+            logger.info(f"Deleted not-in-catalog Ollama tag: {tag}")
+
+        plural = "tags" if len(tags) != 1 else "tag"
+        results = self._run_bulk_with_progress(
+            title="Deleting Ollama models",
+            header=(
+                f"Removing {len(tags)} not-in-catalog Ollama {plural}.\n"
+                "Each tag runs `ollama rm`; cancel takes effect between items."
+            ),
+            items=tags,
+            work_fn=_delete_one,
+            item_label_fn=lambda t: t,
+        )
+        failures = [f"{tag}: {err}" for tag, err in results if err]
         if failures:
             messagebox.showwarning(
                 "Some deletes failed",
                 "Some tags could not be removed:\n\n" + "\n".join(failures),
+                parent=self,
+            )
+        elif len(results) < len(tags):
+            removed = len(results) - len(failures)
+            messagebox.showinfo(
+                "Cancelled",
+                f"Removed {removed} of {len(tags)} not-in-catalog Ollama tag"
+                f"{'s' if len(tags) != 1 else ''} before cancelling. "
+                f"Remaining items were skipped.",
                 parent=self,
             )
         else:
@@ -13402,18 +13565,38 @@ class App(ctk.CTk):
         )
         if not confirm:
             return
-        failures: list[str] = []
         import shutil as _shutil
-        for d in dirs:
-            try:
-                _shutil.rmtree(str(d))
-                logger.info(f"Deleted not-in-catalog ONNX directory: {d}")
-            except Exception as exc:
-                failures.append(f"{d}: {exc}")
+
+        def _delete_one(d: Path) -> None:
+            _shutil.rmtree(str(d))
+            logger.info(f"Deleted not-in-catalog ONNX directory: {d}")
+
+        plural_dir = "directories" if len(dirs) != 1 else "directory"
+        results = self._run_bulk_with_progress(
+            title="Deleting ONNX directories",
+            header=(
+                f"Removing {len(dirs)} not-in-catalog ONNX "
+                f"{plural_dir}.\nLarge directories can take a moment; "
+                "cancel takes effect between items."
+            ),
+            items=dirs,
+            work_fn=_delete_one,
+            item_label_fn=lambda d: d.name,
+        )
+        failures = [f"{d}: {err}" for d, err in results if err]
         if failures:
             messagebox.showwarning(
                 "Some deletes failed",
                 "Some directories could not be removed:\n\n" + "\n".join(failures),
+                parent=self,
+            )
+        elif len(results) < len(dirs):
+            removed = len(results) - len(failures)
+            messagebox.showinfo(
+                "Cancelled",
+                f"Removed {removed} of {len(dirs)} uncatalogued director"
+                f"{'ies' if len(dirs) != 1 else 'y'} before cancelling. "
+                f"Remaining items were skipped.",
                 parent=self,
             )
         else:
