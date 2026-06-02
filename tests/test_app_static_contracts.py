@@ -5908,6 +5908,22 @@ class BenchmarkRetryFailedUnpackContractTests(unittest.TestCase):
             "from get_failed_combos.",
         )
 
+    def test_retry_failed_collapses_options_panel(self):
+        """v.15 UX fix: Retry Failed must auto-collapse the options panel,
+        same as Start Benchmark. Without this, the user clicks Retry, the
+        button goes disabled, and the panel they were looking at stays open
+        so the bench-log feedback below it is hidden — looks like the
+        click did nothing."""
+        src = self._function_source("_retry_failed_benchmark")
+        self.assertIn(
+            "_set_bench_opts_visible(False)",
+            src,
+            "_retry_failed_benchmark must call _set_bench_opts_visible(False) "
+            "to collapse the options panel, mirroring _start_benchmark. "
+            "Otherwise the user sees no visible response to their click — "
+            "the panel hides the bench log where retry progress shows up.",
+        )
+
 
 class BulkDeleteProgressDialogContractTests(unittest.TestCase):
     """v2026.06.02.0 — pin the modal-progress dialog that the
@@ -6015,6 +6031,73 @@ class BulkDeleteProgressDialogContractTests(unittest.TestCase):
             src,
             "_confirm_delete_onnx_dirs must not re-grow an inline "
             "synchronous rmtree loop on the UI thread.",
+        )
+
+
+class OrphanBlobSweepAfterDeleteContractTests(unittest.TestCase):
+    """v.15 fix: after `ollama rm` finishes, sweep blobs the daemon left behind.
+
+    The user reported: deleting Ollama models via Settings → red button leaves
+    blob files on disk that only get detected by the startup orphan scanner.
+    We pin that ``_confirm_delete_ollama_tags`` now calls a sweep helper
+    that uses ``migration.scan_unreferenced_ollama_blobs`` — the
+    reference-based scanner that catches partial-delete leftovers.
+    """
+
+    def _function_source(self, name: str) -> str:
+        tree = ast.parse(APP_TEXT)
+        lines = APP_TEXT.splitlines()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return "\n".join(lines[node.lineno - 1: node.end_lineno])
+        self.fail(f"{name} not found in src/app.py")
+
+    def test_sweep_helper_exists(self):
+        self.assertIn(
+            "def _sweep_unreferenced_ollama_blobs_after_delete(",
+            APP_TEXT,
+            "_sweep_unreferenced_ollama_blobs_after_delete must exist so "
+            "_confirm_delete_ollama_tags has something to call after bulk delete.",
+        )
+
+    def test_sweep_helper_calls_scan_unreferenced_ollama_blobs(self):
+        src = self._function_source("_sweep_unreferenced_ollama_blobs_after_delete")
+        self.assertIn(
+            "scan_unreferenced_ollama_blobs",
+            src,
+            "Sweep helper must call migration.scan_unreferenced_ollama_blobs "
+            "(the reference-based scanner). Re-using the old "
+            "scan_orphan_ollama_blobs would miss partial-delete leftovers.",
+        )
+
+    def test_sweep_helper_routes_deletes_through_progress_dialog(self):
+        src = self._function_source("_sweep_unreferenced_ollama_blobs_after_delete")
+        self.assertIn(
+            "_run_bulk_with_progress",
+            src,
+            "Sweep helper must route the actual blob deletes through "
+            "_run_bulk_with_progress so the user sees a modal progress "
+            "bar instead of a frozen UI.",
+        )
+
+    def test_confirm_delete_ollama_tags_invokes_sweep(self):
+        src = self._function_source("_confirm_delete_ollama_tags")
+        self.assertIn(
+            "_sweep_unreferenced_ollama_blobs_after_delete",
+            src,
+            "_confirm_delete_ollama_tags must call the sweep helper after "
+            "the bulk delete completes — otherwise we never clean up the "
+            "blobs Ollama left behind.",
+        )
+
+    def test_sweep_only_runs_when_at_least_one_delete_succeeded(self):
+        """Don't sweep on a fully-failed run (would surprise the user)."""
+        src = self._function_source("_confirm_delete_ollama_tags")
+        self.assertRegex(
+            src,
+            r"if\s+succeeded\s*:",
+            "Sweep must be gated on `if succeeded:` so a fully-failed "
+            "bulk delete doesn't suddenly prompt for orphan cleanup.",
         )
 
 

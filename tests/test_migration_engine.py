@@ -523,5 +523,89 @@ class DriveTypeTests(unittest.TestCase):
         self.assertNotIn(m._GDT_REMOTE, m.REBOOT_VOLATILE_DRIVE_TYPES)
 
 
+class ScanUnreferencedOllamaBlobsTests(unittest.TestCase):
+    """Reference-based scanner that catches blobs `ollama rm` left behind."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self.root = Path(self._tmp) / "models"
+        (self.root / "blobs").mkdir(parents=True)
+        (self.root / "manifests" / "registry.ollama.ai" / "library" / "x").mkdir(
+            parents=True
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _write_blob(self, hexdigest: str, content: bytes = b"x") -> Path:
+        p = self.root / "blobs" / f"sha256-{hexdigest}"
+        p.write_bytes(content)
+        return p
+
+    def _write_manifest(self, model: str, digests: list[str]) -> None:
+        layers = [
+            {"mediaType": "x", "digest": f"sha256:{d}", "size": 1}
+            for d in digests[1:]
+        ]
+        data = {
+            "schemaVersion": 2,
+            "config": {
+                "mediaType": "x",
+                "digest": f"sha256:{digests[0]}",
+                "size": 1,
+            },
+            "layers": layers,
+        }
+        p = self.root / "manifests" / "registry.ollama.ai" / "library" / model
+        p.mkdir(parents=True, exist_ok=True)
+        (p / "latest").write_text(json.dumps(data), encoding="utf-8")
+
+    def test_unreferenced_blob_is_reported_when_partial_manifests_exist(self):
+        ref_d = "a" * 64
+        orphan_d = "b" * 64
+        self._write_blob(ref_d, b"referenced")
+        self._write_blob(orphan_d, b"orphan-data-here")
+        self._write_manifest("phi", [ref_d])
+        out = m.scan_unreferenced_ollama_blobs(candidate_roots=[self.root])
+        self.assertEqual(len(out), 1)
+        root, blobs = out[0]
+        self.assertEqual(root, self.root)
+        names = [p.name for p, _ in blobs]
+        self.assertEqual(names, [f"sha256-{orphan_d}"])
+        sizes = [s for _, s in blobs]
+        self.assertEqual(sizes, [len(b"orphan-data-here")])
+
+    def test_shared_blob_referenced_by_any_manifest_is_kept(self):
+        shared = "c" * 64
+        only_a = "d" * 64
+        self._write_blob(shared)
+        self._write_blob(only_a)
+        # manifest A references both; manifest B references only the shared one.
+        self._write_manifest("alpha", [shared, only_a])
+        self._write_manifest("beta", [shared])
+        out = m.scan_unreferenced_ollama_blobs(candidate_roots=[self.root])
+        # Both blobs are referenced by at least one manifest -> no findings.
+        self.assertEqual(out, [])
+
+    def test_zero_manifests_returns_empty_and_defers_to_orphan_scan(self):
+        # blobs/ present but manifests/ empty: scan_unreferenced must NOT
+        # report — scan_orphan_ollama_blobs owns that case via the startup
+        # recover/discard dialog so we don't nuke the only copy.
+        self._write_blob("e" * 64, b"orphaned-but-deferred")
+        # manifests dir exists but is empty
+        out = m.scan_unreferenced_ollama_blobs(candidate_roots=[self.root])
+        self.assertEqual(out, [])
+
+    def test_non_sha256_files_in_blobs_dir_are_ignored(self):
+        ref_d = "f" * 64
+        self._write_blob(ref_d)
+        # README or stray file alongside real blobs must be left alone.
+        (self.root / "blobs" / "README.txt").write_text("hands off")
+        (self.root / "blobs" / "partial.download").write_bytes(b"abc")
+        self._write_manifest("phi", [ref_d])
+        out = m.scan_unreferenced_ollama_blobs(candidate_roots=[self.root])
+        self.assertEqual(out, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1276,6 +1276,89 @@ def scan_orphan_ollama_blobs(
     return results
 
 
+def scan_unreferenced_ollama_blobs(
+    *,
+    candidate_roots: Optional[Iterable[Path]] = None,
+) -> list[tuple[Path, list[tuple[Path, int]]]]:
+    """Find blob files no longer referenced by any manifest at each Ollama root.
+
+    Returns one ``(root, [(blob_path, size_bytes), ...])`` tuple per root
+    that has at least one unreferenced blob.  Roots with zero unreferenced
+    blobs are omitted, so an empty list means "everything is in order".
+
+    A blob file is "unreferenced" when its filename (``sha256-<hex>``)
+    does not appear in the digest set of ANY manifest under
+    ``<root>/manifests/``.  This complements :func:`scan_orphan_ollama_blobs`
+    which only flags the manifests-completely-empty case — this scanner
+    catches the partial-delete case (some manifests still present, but
+    some blobs they used to share are now strictly unused).
+
+    Safety note: if a root has a ``blobs/`` directory but zero manifests,
+    we conservatively report zero unreferenced blobs and let the existing
+    ``scan_orphan_ollama_blobs`` handle that case via the startup
+    recover/discard dialog.  This avoids accidentally nuking the only
+    copy of blobs whose manifests were lost mid-migration.
+
+    Default candidates: ``$OLLAMA_MODELS`` (if set) and ``~/.ollama/models``.
+    """
+    if candidate_roots is None:
+        cands: list[Path] = []
+        env_dir = os.environ.get("OLLAMA_MODELS")
+        if env_dir:
+            cands.append(Path(env_dir))
+        cands.append(Path.home() / ".ollama" / "models")
+        candidate_roots = cands
+
+    seen: set[str] = set()
+    results: list[tuple[Path, list[tuple[Path, int]]]] = []
+    for raw in candidate_roots:
+        root = Path(raw)
+        key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        blobs_dir = root / "blobs"
+        if not blobs_dir.is_dir():
+            continue
+        # Collect every digest referenced by every manifest under this root.
+        # If there are NO manifests at all, fall through to the orphan-blob
+        # scanner instead — see safety note above.
+        referenced: set[str] = set()
+        manifest_count = 0
+        for manifest in iter_manifest_paths(root):
+            manifest_count += 1
+            referenced |= collect_manifest_blob_digests(manifest)
+        if manifest_count == 0:
+            continue
+        unreferenced: list[tuple[Path, int]] = []
+        try:
+            blob_iter = blobs_dir.iterdir()
+        except OSError:
+            continue
+        for blob in blob_iter:
+            try:
+                if not blob.is_file():
+                    continue
+                name = blob.name
+                # Only consider Ollama-style blob filenames — leave anything
+                # else (READMEs, partial downloads, etc.) untouched.
+                if not name.startswith("sha256-"):
+                    continue
+                if name in referenced:
+                    continue
+                try:
+                    size = blob.stat().st_size
+                except OSError:
+                    size = 0
+                unreferenced.append((blob, size))
+            except OSError:
+                continue
+        if unreferenced:
+            unreferenced.sort(key=lambda p: p[0].name)
+            results.append((root, unreferenced))
+    return results
+
+
 def scan_legacy_onnx_paths(
     *,
     localappdata: Optional[Path] = None,
@@ -1773,6 +1856,7 @@ __all__ = [
     "parse_robocopy_line",
     "normalize_ollama_tag",
     "scan_orphan_ollama_blobs",
+    "scan_unreferenced_ollama_blobs",
     "scan_legacy_onnx_paths",
     "scan_legacy_hf_cache",
     "scan_config_coherence",

@@ -247,7 +247,7 @@ except ImportError:
     PIL_AVAILABLE = False
 
 APP_TITLE = "LocalAI Studio"
-APP_VERSION = "2026.06.02.1"
+APP_VERSION = "2026.06.02.2"
 
 CHAT_RESPONSE_TOKEN_MAX = 131072
 CHAT_RESPONSE_TOKEN_ONNX_FALLBACK = 4096
@@ -10029,6 +10029,13 @@ class App(ctk.CTk):
         self._bench_log.delete("1.0", "end")
         self._bench_log.configure(state="disabled")
 
+        # v.15 UX fix: collapse the options panel the same way Start Benchmark
+        # does. Without this, the user sees no visible response to their
+        # Retry Failed click — the button just goes disabled and the panel
+        # they were looking at stays open, hiding the bench log below it.
+        if self._bench_opts_visible():
+            self._set_bench_opts_visible(False)
+
         self._bench_start_btn.configure(state="disabled")
         self._bench_stop_btn.configure(state="normal")
         self._bench_retry_btn.configure(state="disabled")
@@ -13473,6 +13480,93 @@ class App(ctk.CTk):
         dlg.wait_window()
         return results
 
+    def _sweep_unreferenced_ollama_blobs_after_delete(self) -> None:
+        """Find blobs left behind after a bulk `ollama rm` and offer to delete them.
+
+        `ollama rm <tag>` deletes the manifest but does NOT garbage-collect
+        the blobs the manifest referenced — they're cleaned up lazily, or
+        sometimes not at all (when Ollama crashes mid-prune).  After a
+        bulk delete from the Settings red button, we sweep them up so the
+        disk space the user expected to recover actually gets recovered.
+
+        Silent when there are no orphans; otherwise a single yes/no prompt
+        shows the count and freed bytes.  Default is Yes — the user just
+        chose to delete models, so reclaiming orphan blobs matches intent.
+        """
+        try:
+            findings = _migration.scan_unreferenced_ollama_blobs()
+        except Exception:
+            logger.exception("scan_unreferenced_ollama_blobs failed")
+            return
+        if not findings:
+            return
+        # Flatten across roots; we treat all roots together for the prompt
+        # so the user sees a single dialog.
+        all_blobs: list[tuple[Path, int]] = []
+        for _root, blobs in findings:
+            all_blobs.extend(blobs)
+        if not all_blobs:
+            return
+        total_bytes = sum(s for _p, s in all_blobs)
+        n = len(all_blobs)
+        # Pretty-format the size in the most useful unit for the user.
+        if total_bytes >= 1_000_000_000:
+            size_str = f"{total_bytes / 1_000_000_000:.2f} GB"
+        elif total_bytes >= 1_000_000:
+            size_str = f"{total_bytes / 1_000_000:.1f} MB"
+        elif total_bytes >= 1_000:
+            size_str = f"{total_bytes / 1_000:.1f} KB"
+        else:
+            size_str = f"{total_bytes} bytes"
+        plural = "s" if n != 1 else ""
+        confirm = messagebox.askyesno(
+            "Clean up orphan blobs?",
+            f"Found {n} orphan Ollama blob{plural} ({size_str}) left behind "
+            f"by `ollama rm`.\n\nDeleting them now will free {size_str} of disk "
+            "space and cannot be undone.\n\nDelete the orphan blob"
+            f"{plural} now?",
+            default=messagebox.YES,
+            parent=self,
+        )
+        if not confirm:
+            return
+
+        def _delete_blob(item: tuple[Path, int]) -> None:
+            path, _size = item
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                return
+            except OSError as exc:
+                raise RuntimeError(str(exc)[:160])
+
+        results = self._run_bulk_with_progress(
+            title="Removing orphan blobs",
+            header=(
+                f"Removing {n} orphan blob{plural} ({size_str}).\n"
+                "Each blob is a shared layer no longer referenced by any model."
+            ),
+            items=all_blobs,
+            work_fn=_delete_blob,
+            item_label_fn=lambda item: item[0].name,
+        )
+        blob_failures = [
+            f"{item[0].name}: {err}" for item, err in results if err
+        ]
+        if blob_failures:
+            messagebox.showwarning(
+                "Some orphan blobs could not be removed",
+                "These blobs could not be deleted (they may be locked or "
+                "already gone):\n\n" + "\n".join(blob_failures[:20]),
+                parent=self,
+            )
+        else:
+            removed = sum(1 for _item, err in results if not err)
+            if removed == n:
+                logger.info(
+                    f"Removed {removed} orphan Ollama blob{plural} ({size_str})."
+                )
+
     def _confirm_delete_ollama_tags(self, tags: list[str]) -> None:
         """Confirm + run ``ollama rm`` on each tag in *tags*. No-op on empty input."""
         tags = [t for t in (tags or []) if isinstance(t, str) and t.strip()]
@@ -13518,6 +13612,7 @@ class App(ctk.CTk):
             item_label_fn=lambda t: t,
         )
         failures = [f"{tag}: {err}" for tag, err in results if err]
+        succeeded = [tag for tag, err in results if not err]
         if failures:
             messagebox.showwarning(
                 "Some deletes failed",
@@ -13540,6 +13635,13 @@ class App(ctk.CTk):
                 f"{'s' if len(tags) != 1 else ''}.",
                 parent=self,
             )
+        # If at least one tag was removed, sweep up orphan blobs that
+        # `ollama rm` left behind.  Skipped on a fully-failed run.
+        if succeeded:
+            try:
+                self._sweep_unreferenced_ollama_blobs_after_delete()
+            except Exception:
+                logger.exception("Orphan-blob sweep after delete failed")
         body = getattr(self, "_uncatalogued_body_ref", None)
         if body is not None:
             try:
