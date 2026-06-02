@@ -5753,6 +5753,68 @@ class SetupPs1WrapperContractTests(unittest.TestCase):
         self.assertNotIn("LOCALAI_SETUP_TEED", text)
         self.assertNotIn("Tee-Object", text)
 
+    def test_setup1_bat_has_no_colon_comments_inside_parens_blocks(self):
+        """v2026.06.01.12 — pin the ``::`` inside ``(...)`` bug fix.
+
+        The v.11 release shipped with a latent cmd parser hazard: ``::``
+        comments inside parenthesized ``if (...)`` / ``for (...)`` blocks
+        are NOT fully ignored by cmd.exe — the parser still tokenizes
+        the comment text, and any inner parens (e.g. ``:: foo (bar) baz``)
+        prematurely close the outer block, producing errors like
+        ``"baz was unexpected at this time."`` and aborting setup with
+        exit code 255. The first user with ``INSTALL_UTILITY=y`` AND
+        ``INSTALL_ONNX=y`` (i.e. "Setup all features" mode) hit this on
+        an actual install run when ``:: \\`onnxruntime\\` (CPU) via dep
+        extras like optimum[onnxruntime]`` was parsed.
+
+        Use ``REM`` (a real command) instead of ``::`` (a label) inside
+        any parenthesized block — REM safely swallows everything to the
+        end of line, no matter what punctuation follows.
+        """
+        text = self.SETUP1_BAT.read_text(encoding="utf-8")
+
+        def count_unquoted(line, ch):
+            n = 0
+            in_dq = False
+            in_bt = False
+            i = 0
+            while i < len(line):
+                c = line[i]
+                if c == "^" and i + 1 < len(line):
+                    i += 2
+                    continue
+                if c == '"':
+                    in_dq = not in_dq
+                elif c == "`":
+                    in_bt = not in_bt
+                elif c == ch and not in_dq and not in_bt:
+                    n += 1
+                i += 1
+            return n
+
+        depth = 0
+        offenders = []
+        for idx, line in enumerate(text.splitlines(), 1):
+            stripped = line.lstrip()
+            if depth > 0 and stripped.startswith("::"):
+                offenders.append((idx, depth, stripped[:90]))
+            opens = count_unquoted(line, "(")
+            closes = count_unquoted(line, ")")
+            depth += opens - closes
+            if depth < 0:
+                depth = 0
+
+        if offenders:
+            details = "\n".join(
+                f"  L{idx} (paren depth={d}): {snippet}"
+                for idx, d, snippet in offenders
+            )
+            self.fail(
+                f"setup1.bat has {len(offenders)} '::' comment(s) inside "
+                f"parens block(s) — convert each to 'REM' to avoid the "
+                f"cmd parser hazard described in v2026.06.01.12:\n{details}"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

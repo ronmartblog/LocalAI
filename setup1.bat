@@ -5,7 +5,7 @@
 :: switches Windows to block buffering, so prompt text never flushes before user
 :: input is required. setup.log diagnostic capture is deferred to a future design
 :: that does not break interactivity (e.g. write-on-failure only, or a native
-:: Windows transcript mechanism that preserves console I/O). See AGENTS.md
+REM Windows transcript mechanism that preserves console I/O). See AGENTS.md
 :: "DO NOT REGRESS" row for the full rationale.
 setlocal enabledelayedexpansion
 
@@ -221,7 +221,7 @@ echo [*] Installing ONNX runtime packages (variant: !SETUP_ONNX_LABEL!) ...
 :: three genai packages (-genai / -genai-cuda / -genai-directml) all install
 :: into the same onnxruntime/ namespace -- installing more than one leaves
 :: onnxruntime.__file__ == None and InferenceSession gone (workstation-class
-:: Py3.13 regression that broke Toolbox Speak in v.6). Pre-purge ALL six variants
+REM Py3.13 regression that broke Toolbox Speak in v.6). Pre-purge ALL six variants
 :: before each install so half-installed state from any earlier run cannot
 :: shadow the chosen wheel.
 "%PYTHON_EXE%" -m pip uninstall -y onnxruntime onnxruntime-gpu onnxruntime-directml onnxruntime-genai onnxruntime-genai-cuda onnxruntime-genai-directml >nul 2>&1
@@ -277,16 +277,16 @@ if errorlevel 1 (
 )
 if /i "!INSTALL_ONNX!"=="y" (
     echo [*] Reconciling !SETUP_ONNX_LABEL! ONNX runtime after utility packages ...
-    :: v2026.06.01.7 (Ron, 2026-06-01): utility install above pulls bare
-    :: `onnxruntime` (CPU) via dep extras like optimum[onnxruntime]; on
-    :: NVIDIA / AMD-Intel boxes this would shadow the GPU / DML wheel we
-    :: chose in the ONNX install step, leaving onnxruntime.__file__ == None
-    :: and InferenceSession gone. Purge ALL six variants and re-install the
-    :: chosen one so it definitively wins. cd back to the script dir first
-    :: in case any earlier step left cwd on a now-missing drive (a
-    :: workstation-class setup log in v.6 showed two spurious "The system
-    :: cannot find the drive specified." messages right here -- pinning
-    :: cwd suppresses them).
+    REM v2026.06.01.7 (Ron, 2026-06-01): utility install above pulls bare
+    REM `onnxruntime` (CPU) via dep extras like optimum[onnxruntime]; on
+    REM NVIDIA / AMD-Intel boxes this would shadow the GPU / DML wheel we
+    REM chose in the ONNX install step, leaving onnxruntime.__file__ == None
+    REM and InferenceSession gone. Purge ALL six variants and re-install the
+    REM chosen one so it definitively wins. cd back to the script dir first
+    REM in case any earlier step left cwd on a now-missing drive (a
+    REM workstation-class setup log in v.6 showed two spurious "The system
+    REM cannot find the drive specified." messages right here -- pinning
+    REM cwd suppresses them).
     cd /d "%~dp0"
     "%PYTHON_EXE%" -m pip uninstall -y onnxruntime onnxruntime-gpu onnxruntime-directml onnxruntime-genai onnxruntime-genai-cuda onnxruntime-genai-directml >nul 2>&1
     "%PYTHON_EXE%" -m pip install --upgrade --no-warn-conflicts !SETUP_ONNX_PKG! !SETUP_ONNX_GENAI_PKG! --quiet
@@ -315,7 +315,7 @@ set OLLAMA_EXE=
 if exist "%LocalAppData%\Programs\Ollama\ollama.exe" set OLLAMA_EXE=%LocalAppData%\Programs\Ollama\ollama.exe
 if exist "%ProgramFiles%\Ollama\ollama.exe"          set OLLAMA_EXE=%ProgramFiles%\Ollama\ollama.exe
 if not defined OLLAMA_EXE (
-    :: Fall back to PATH search (works on run 2+)
+    REM Fall back to PATH search (works on run 2+)
     for /f "tokens=*" %%O in ('where ollama 2^>nul') do if not defined OLLAMA_EXE set OLLAMA_EXE=%%O
 )
 
@@ -337,7 +337,7 @@ if defined OLLAMA_EXE (
         echo [*] Waiting for Ollama installer to complete ...
         timeout /t 10 /nobreak >nul
         call :refresh_path
-        :: Check known paths again after install
+        REM Check known paths again after install
         if exist "%LocalAppData%\Programs\Ollama\ollama.exe" (
             set OLLAMA_EXE=%LocalAppData%\Programs\Ollama\ollama.exe
             echo [OK] Ollama installed successfully.
@@ -569,7 +569,7 @@ if defined SETUP_DML_GPU_NAMES set SETUP_HAS_DML_GPU=1
 :: onnxruntime-directml all install into the same onnxruntime/ namespace
 :: and are mutually exclusive. Installing two side-by-side leaves the
 :: namespace half-broken (onnxruntime.__file__ is None, InferenceSession
-:: vanishes) and Toolbox features that do `from onnxruntime import
+REM vanishes) and Toolbox features that do `from onnxruntime import
 :: InferenceSession` crash. Branching here so every later pip install
 :: step uses the same chosen variant.
 if "!SETUP_HAS_NVIDIA!"=="1" (
@@ -610,7 +610,7 @@ echo.
 :: --no-cache-dir was needed pre-v5.3.10 because pip cachecontrol spooled the
 :: 2.8 GB CUDA wheel into a Windows %TEMP% temp file that could fail with
 :: OSError 28 even on a half-empty disk (commit-limit / Defender lock /
-:: roaming profile container cap). v5.3.10 redirects PIP_CACHE_DIR / TMP / TEMP /
+REM roaming profile container cap). v5.3.10 redirects PIP_CACHE_DIR / TMP / TEMP /
 :: HF_HOME / TORCH_HOME to <app>\.cache\ BEFORE this script runs anything,
 :: so the spool now lives on the install drive and the workaround can be
 :: removed. We keep --disable-pip-version-check for terse output and
@@ -655,13 +655,13 @@ if not errorlevel 1 (
 :: + torch_directml already import cleanly AND torch_directml.is_available()
 :: is True, the existing install is ABI-coherent - skip the reinstall.
 :: If the import fails (the "Entry Point Not Found: torch_library_impl in
-:: _torchaudio.pyd" Windows dialog scenario), torch and torchaudio have
-:: drifted out of ABI sync. SetErrorMode^(0x8001 = SEM_FAILCRITICALERRORS ^|
-:: SEM_NOOPENFILEERRORBOX^) suppresses the OS dialog so the failure surfaces
-:: as a clean nonzero exit instead of blocking on a confusing popup. On
-:: drift we uninstall before reinstalling: --upgrade alone cannot repair
-:: the drift because torch-directml's torch pin keeps pip from touching
-:: torch while torchaudio gets bumped independently, leaving them mismatched.
+REM _torchaudio.pyd" Windows dialog scenario), torch and torchaudio have
+REM drifted out of ABI sync. SetErrorMode^(0x8001 = SEM_FAILCRITICALERRORS ^|
+REM SEM_NOOPENFILEERRORBOX^) suppresses the OS dialog so the failure surfaces
+REM as a clean nonzero exit instead of blocking on a confusing popup. On
+REM drift we uninstall before reinstalling: --upgrade alone cannot repair
+REM the drift because torch-directml's torch pin keeps pip from touching
+REM torch while torchaudio gets bumped independently, leaving them mismatched.
 echo [*] Checking DirectML PyTorch ABI health ...
 "%PYTHON_EXE%" -c "import ctypes, sys; ctypes.windll.kernel32.SetErrorMode(0x8001); import torch, torchaudio, torch_directml; sys.exit(0 if torch_directml.is_available() else 1)" >nul 2>&1
 if not errorlevel 1 (
@@ -672,18 +672,18 @@ if not errorlevel 1 (
 echo [*] DirectML PyTorch missing or torch/torchaudio drifted out of ABI sync.
 echo     Performing clean reinstall ^(uninstall first, then matched-set install^) ...
 "%PYTHON_EXE%" -m pip uninstall -y torch torchvision torchaudio torch-directml >nul 2>&1
-:: v5.5.11 (Ron, 2026-05-26): two-step install to prevent torchaudio drift.
-:: v5.5.10 used `pip install --upgrade torch-directml torch torchvision torchaudio`
-:: which let pip's resolver pick the LATEST torchaudio (e.g. 2.11.0) against
-:: torch-directml's pinned torch (2.4.1), producing WinError 127 /
-:: "torch_library_impl in _torchaudio.pyd" on Intel AI PC. Step 1 installs
-:: torch-directml ALONE so its torch pin lands first. Step 2 discovers that
-:: pinned torch version at runtime and installs torchaudio==<same-version> +
-:: torchvision against it. Future-proof: when MS bumps torch-directml to a new
-:: torch, this auto-adapts without a code change.
-:: Cache redirection happens at script top via PIP_CACHE_DIR / TMP / TEMP
-:: pointing at %~dp0.cache so the multi-GB DirectML+torch spool lands on the
-:: install drive instead of the (possibly tiny) profile drive.
+REM v5.5.11 (Ron, 2026-05-26): two-step install to prevent torchaudio drift.
+REM v5.5.10 used `pip install --upgrade torch-directml torch torchvision torchaudio`
+REM which let pip's resolver pick the LATEST torchaudio (e.g. 2.11.0) against
+REM torch-directml's pinned torch (2.4.1), producing WinError 127 /
+REM "torch_library_impl in _torchaudio.pyd" on Intel AI PC. Step 1 installs
+REM torch-directml ALONE so its torch pin lands first. Step 2 discovers that
+REM pinned torch version at runtime and installs torchaudio==<same-version> +
+REM torchvision against it. Future-proof: when MS bumps torch-directml to a new
+REM torch, this auto-adapts without a code change.
+REM Cache redirection happens at script top via PIP_CACHE_DIR / TMP / TEMP
+REM pointing at %~dp0.cache so the multi-GB DirectML+torch spool lands on the
+REM install drive instead of the (possibly tiny) profile drive.
 echo [*] Installing torch-directml ^(pins torch^) ...
 "%PYTHON_EXE%" -m pip install --upgrade --no-input --disable-pip-version-check --no-warn-conflicts torch-directml
 if errorlevel 1 (
@@ -715,10 +715,10 @@ if errorlevel 1 (
     "%PYTHON_EXE%" -m pip cache purge >nul 2>&1
     exit /b 1
 )
-:: v5.5.10: post-install ABI verify with SetErrorMode-suppressed import. If
-:: this still fails after a clean uninstall+reinstall, point the user at
-:: fix_directml_pytorch.bat for verbose diagnostics (likely a GPU driver
-:: issue or a corrupted Python environment that needs manual attention).
+REM v5.5.10: post-install ABI verify with SetErrorMode-suppressed import. If
+REM this still fails after a clean uninstall+reinstall, point the user at
+REM fix_directml_pytorch.bat for verbose diagnostics (likely a GPU driver
+REM issue or a corrupted Python environment that needs manual attention).
 echo [*] Verifying DirectML PyTorch ABI alignment ...
 "%PYTHON_EXE%" -c "import ctypes; ctypes.windll.kernel32.SetErrorMode(0x8001); import torch, torchaudio, torch_directml; assert torch_directml.is_available(), 'torch-directml installed but no DirectML device is visible'; print(f'  PyTorch: {torch.__version__}'); print(f'  torchaudio: {torchaudio.__version__}'); print(f'  DirectML device: {torch_directml.device_name(0)}')" 2>&1
 if errorlevel 1 (
@@ -730,7 +730,7 @@ echo [OK] DirectML acceleration packages installed and verified.
 exit /b 0
 
 :find_python
-:: Search PATH first (skips the Store python.exe stub — it returns exit code 9009)
+REM Search PATH first (skips the Store python.exe stub — it returns exit code 9009)
 for %%P in (python.exe python3.exe py.exe) do (
     "%%~$PATH:P" --version >nul 2>&1
     if not errorlevel 1 (
@@ -738,7 +738,7 @@ for %%P in (python.exe python3.exe py.exe) do (
         goto :eof
     )
 )
-:: Search common install locations for any Python 3.x
+REM Search common install locations for any Python 3.x
 for /d %%D in (
     "%LocalAppData%\Programs\Python\Python3*"
     "%ProgramFiles%\Python3*"
@@ -749,7 +749,7 @@ for /d %%D in (
         goto :eof
     )
 )
-:: Check the Python Launcher which can resolve to any installed version
+REM Check the Python Launcher which can resolve to any installed version
 if exist "%LocalAppData%\Programs\Python\Launcher\py.exe" (
     "%LocalAppData%\Programs\Python\Launcher\py.exe" --version >nul 2>&1
     if not errorlevel 1 (
@@ -760,8 +760,8 @@ if exist "%LocalAppData%\Programs\Python\Launcher\py.exe" (
 goto :eof
 
 :refresh_path
-:: Read the updated Machine + User PATH from the registry and apply to this session.
-:: This is needed because winget updates the registry but not the current cmd session.
+REM Read the updated Machine + User PATH from the registry and apply to this session.
+REM This is needed because winget updates the registry but not the current cmd session.
 for /f "usebackq delims=" %%M in (
     `powershell -NoProfile -Command "[System.Environment]::GetEnvironmentVariable('PATH','Machine')"`
 ) do set "MACHINE_PATH=%%M"
@@ -772,11 +772,11 @@ if defined MACHINE_PATH if defined USER_PATH set "PATH=!MACHINE_PATH!;!USER_PATH
 goto :eof
 
 :diagnose_msi_service
-:: Check Windows Installer service health and provide troubleshooting guidance
+REM Check Windows Installer service health and provide troubleshooting guidance
 echo Diagnosing Windows Installer service...
 echo.
 
-:: Check if msiexec processes are running
+REM Check if msiexec processes are running
 set MSI_RUNNING=0
 for /f %%i in ('tasklist /FI "IMAGENAME eq msiexec.exe" 2^>nul ^| find /c /i "msiexec.exe"') do set MSI_COUNT=%%i
 if %MSI_COUNT% gtr 0 (
@@ -786,13 +786,13 @@ if %MSI_COUNT% gtr 0 (
     echo.
 )
 
-:: Check Windows Installer service status
+REM Check Windows Installer service status
 for /f "tokens=3" %%s in ('sc query msiserver ^| findstr /C:"STATE"') do set MSI_STATE=%%s
 
 echo Windows Installer Service ^(msiserver^): !MSI_STATE!
 echo.
 
-:: Provide specific guidance based on what we found
+REM Provide specific guidance based on what we found
 if !MSI_RUNNING! equ 1 (
     echo [*] Active installations detected. This could be:
     echo     - A legitimate installation in progress ^(wait for it to finish^)
