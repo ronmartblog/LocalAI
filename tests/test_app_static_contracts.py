@@ -5692,9 +5692,10 @@ class SetupPs1WrapperContractTests(unittest.TestCase):
         text = self.SETUP_BAT.read_text(encoding="utf-8")
         # Sanity check on size — original setup.bat was ~42KB. The shim
         # must stay tiny so it's obvious at a glance that it's a launcher,
-        # not the installer. 4KB ceiling leaves room for comments + the
-        # error-path messages, but rules out anyone re-adding install logic.
-        self.assertLess(len(text), 4096,
+        # not the installer. 6KB ceiling leaves room for comments, the
+        # error-path messages, and the v2026.06.02.0 zip-preview guard,
+        # but still rules out anyone re-adding install logic.
+        self.assertLess(len(text), 6144,
                         f"setup.bat must remain a tiny shim ({len(text)} bytes "
                         "is too large). The real install logic lives in "
                         "setup1.bat — do not move it back.")

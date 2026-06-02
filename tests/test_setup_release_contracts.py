@@ -2101,6 +2101,53 @@ class DiagnosticLogContractTests(unittest.TestCase):
       no app-level events in the file.
     """
 
+    def test_setup_bats_guard_against_zip_preview_and_temp_extractor_paths(self):
+        """v2026.06.02.0: A user reported a confusing
+        ``[Errno 2] No such file or directory: ...onnxruntime_genai_cuda...whl``
+        mid-install error. Root cause: they double-clicked setup.bat from
+        inside Windows Explorer's zip preview, which extracts to a path
+        like ``%TEMP%\\<GUID>_<zipname>.zip.e2b\\`` — already ~135 chars,
+        and setup1.bat's pip-cache redirection nests the wheel-unpack
+        directory further until Windows MAX_PATH=260 is exceeded.
+
+        Both setup.bat (the shim) and setup1.bat (the actual installer,
+        defense-in-depth) must guard against running from such a path
+        and fail fast with a friendly fix-it message ("Extract All... to a
+        SHORT path like C:\\LocalAI") rather than letting pip blow up
+        halfway through the install."""
+        for rel in ("setup.bat", "setup1.bat"):
+            with self.subTest(file=rel):
+                text = read(rel)
+                self.assertIn(
+                    ".zip.e2b\\",
+                    text,
+                    f"{rel} must check for the Windows zip-preview marker "
+                    "`.zip.e2b\\` in the script directory path so users "
+                    "who double-click setup.bat from inside a zip preview "
+                    "get a friendly error before pip blows past MAX_PATH.",
+                )
+                self.assertIn(
+                    ".zip\\",
+                    text,
+                    f"{rel} must also check for the broader `.zip\\` "
+                    "directory marker so 7-Zip / WinRAR temp extractors "
+                    "(which produce paths like %TEMP%\\<name>.zip\\) are "
+                    "caught too.",
+                )
+                self.assertIn(
+                    "MAX_PATH",
+                    text,
+                    f"{rel} guard message must mention MAX_PATH so users "
+                    "understand WHY installing from a deep temp path fails.",
+                )
+                self.assertIn(
+                    "Extract All",
+                    text,
+                    f"{rel} guard message must tell users to use Windows "
+                    "Explorer's `Extract All...` rather than just opening "
+                    "the zip preview.",
+                )
+
     def test_setup_bat_does_not_use_powershell_tee_wrapper(self):
         """v2026.06.01.5 revert: the self-tee wrapper added in v.4 broke
         interactive prompts. Make sure nobody adds it back without a

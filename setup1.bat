@@ -9,6 +9,56 @@ REM Windows transcript mechanism that preserves console I/O). See AGENTS.md
 :: "DO NOT REGRESS" row for the full rationale.
 setlocal enabledelayedexpansion
 
+rem === Zip-preview / temp-folder guard (defense in depth, mirrors setup.bat) =====
+rem v2026.06.02.0: setup.bat already guards against this, but setup1.bat is the
+rem actual installer that redirects pip's cache to %~dp0.cache below — if it
+rem ever gets invoked directly from a temp/zip-preview path the redirected
+rem cache root is already 130+ chars and pip unpack of CUDA wheels blows past
+rem MAX_PATH=260. Duplicate the check here so a direct setup1.bat run can't
+rem bypass the friendly fix-it message.
+rem ==============================================================================
+set "_GUARD_DIR=%~dp0"
+set "_FROM_ZIP_PREVIEW=0"
+set "_FROM_TEMP_FOLDER=0"
+if not "!_GUARD_DIR!"=="!_GUARD_DIR:.zip.e2b\=!" set "_FROM_ZIP_PREVIEW=1"
+if not "!_GUARD_DIR!"=="!_GUARD_DIR:.zip\=!"     set "_FROM_ZIP_PREVIEW=1"
+if defined TEMP (
+    set "_TMP=!TEMP!\"
+    call set "_STRIPPED=%%_GUARD_DIR:!_TMP!=%%"
+    if not "!_GUARD_DIR!"=="!_STRIPPED!" set "_FROM_TEMP_FOLDER=1"
+)
+if defined LOCALAPPDATA (
+    set "_TMP=!LOCALAPPDATA!\Temp\"
+    call set "_STRIPPED=%%_GUARD_DIR:!_TMP!=%%"
+    if not "!_GUARD_DIR!"=="!_STRIPPED!" set "_FROM_TEMP_FOLDER=1"
+)
+if not "!_FROM_ZIP_PREVIEW!!_FROM_TEMP_FOLDER!"=="00" (
+    echo.
+    echo ================================================================
+    echo  [ERROR] LocalAI cannot install from inside a zip preview / temp folder.
+    echo ================================================================
+    echo.
+    echo  setup1.bat is running from:
+    echo    !_GUARD_DIR!
+    echo.
+    echo  This looks like a Windows zip preview or temp-extractor location.
+    echo  Installing from here WILL FAIL when pip unpacks the CUDA wheels
+    echo  ^(Windows MAX_PATH=260 limit is exceeded by the deeply-nested
+    echo  wheels under the cache directory^).
+    echo.
+    echo  To fix:
+    echo    1. Close this window.
+    echo    2. Right-click the LocalAI .zip in File Explorer and pick
+    echo       "Extract All..." ^(do NOT just open / double-click the zip^).
+    echo    3. Extract to a SHORT path like  C:\LocalAI
+    echo    4. Open the extracted folder and double-click setup.bat there.
+    echo.
+    pause
+    endlocal
+    exit /b 1
+)
+rem === end zip-preview guard ====================================================
+
 :: ── Off-profile cache redirection (v5.3.10) ───────────────────────────────────
 :: Route pip download/build, HuggingFace, torch, and TMP caches to <app>\.cache
 :: BEFORE any pip / python invocation so multi-GB CUDA wheels never spool into
