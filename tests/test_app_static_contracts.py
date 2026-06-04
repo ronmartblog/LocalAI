@@ -3301,8 +3301,8 @@ class DocsRound3ContractTests(unittest.TestCase):
         docs = ROOT / "docs"
         cls.index = (docs / "index.html").read_text(encoding="utf-8")
         cls.image_gen = (docs / "image-gen-guide.html").read_text(encoding="utf-8")
-        # localai-docs-extension.js is maintainer-only (injects Windows 365
-        # Cloud PC SKU overlays into the local docs) and is intentionally
+        # localai-docs-extension.js is maintainer-only (injects maintainer
+        # SKU overlays into the local docs) and is intentionally
         # excluded from the public repo per manifest.txt. Tests that read it
         # must skip gracefully on the public-repo checkout instead of
         # failing setUpClass for the whole test class.

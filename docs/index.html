@@ -507,7 +507,7 @@
 <header class="page-header" id="page-header">
   <div class="wrap">
     <div class="header-row">
-      <h1>LocalAI Studio <span class="badge">v2026.06.02.2</span></h1>
+      <h1>LocalAI Studio <span class="badge">v2026.06.04.1</span></h1>
       <span class="spacer"></span>
       <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Switch to light theme">☀ Light</button>
       <p class="header-sub">Run AI language models and generate images 100% locally — GPU, NPU, or CPU. No cloud, no subscription.</p>
@@ -1284,6 +1284,18 @@ python main.py</pre>
           Check the System tab to verify GPU detection. Select a smaller model for faster responses.</td>
     </tr>
     <tr>
+      <td>Task Manager shows only ~50% CPU usage during CPU-only chat (large multi-core systems)</td>
+      <td>Not a bug — Ollama (built on llama.cpp) intentionally uses one thread per
+          <em>physical</em> core, so on a 16-core / 32-thread CPU you'll see roughly half
+          utilization with the other SMT (hyper-threaded) siblings idle. LLM inference is
+          bound by the AVX / FPU execution units on each core, which are shared between SMT
+          siblings, so forcing twice as many threads gives essentially zero speedup. Verified
+          on a 16C/32T AMD EPYC VM with Llama 3.1 8B Q4: <strong>14.32 tok/s</strong> at 16
+          threads vs <strong>14.34 tok/s</strong> at 32 threads (<code>OLLAMA_NUM_THREAD=32</code>).
+          The cosmetic graph is misleading — you're already getting full throughput, and
+          overriding the thread count won't make generation faster.</td>
+    </tr>
+    <tr>
       <td>NPU option has no effect</td>
       <td>Install ONNX Runtime DirectML (see NPU Setup section). The System tab shows whether DirectML is available.</td>
     </tr>
@@ -1490,7 +1502,7 @@ C:\Users\&lt;username&gt;\.ollama\models</pre>
   <a href="Model-Guide.html">Model Guide</a> &middot;
   <a href="image-gen-guide.html">Image Gen Guide</a>
   <br>
-  <span>LocalAI Studio v2026.06.02.2 &middot; Ron Martinsen &middot; Apache 2.0 License</span>
+  <span>LocalAI Studio v2026.06.04.1 &middot; Ron Martinsen &middot; Apache 2.0 License</span>
 </footer>
 
 <script>
