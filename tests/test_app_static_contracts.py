@@ -3914,10 +3914,20 @@ class UxPolishV550ContractTests(unittest.TestCase):
     def test_comfyui_download_done_refreshes_detail_pane(self):
         source = self._function_source("_comfyui_download_done")
         # Post-install, the right-pane state used to go stale until the user
-        # clicked another row and back. The fix routes the post-install
-        # refresh through ``_update_model_detail`` directly (the per-card
-        # loop already handles list-pane button state).
-        self.assertIn("_update_model_detail", source)
+        # clicked another row and back. The fix repaints list + detail from
+        # local files via ``_refresh_visible_model_status_from_snapshots``
+        # (which updates the detail pane internally) WITHOUT a blocking
+        # ComfyUI HTTP probe on the Tk thread. The image-download-hang fix
+        # (2026-06-03) replaced the direct ``_update_model_detail`` +
+        # ``_get_cached_comfyui_model_names(force_refresh=True)`` calls with
+        # an immediate local-file snapshot plus a background probe.
+        self.assertIn("_refresh_visible_model_status_from_snapshots", source)
+        self.assertIn("_remember_comfyui_model_file", source)
+        # The blocking on-Tk-thread ComfyUI probe must never come back here.
+        self.assertNotIn(
+            "_get_cached_comfyui_model_names(force_refresh=True)\n",
+            source.replace("# IMPORTANT: do NOT call _get_cached_comfyui_model_names(force_refresh=True)\n", ""),
+        )
 
 
 class UxPolishV551ContractTests(unittest.TestCase):
@@ -4394,9 +4404,14 @@ class UxPolishV551ContractTests(unittest.TestCase):
         a stale list right after a download (OS fs propagation + ComfyUI's
         own watcher latency). Schedule a second forced refresh ~3 s after
         the immediate one so the right pane and card row catch up without
-        the user clicking another row. Cheap, idempotent."""
+        the user clicking another row. Cheap, idempotent.
+
+        Image-download-hang fix (2026-06-03): the second refresh now runs the
+        background status-refresh worker (``_schedule_model_status_refresh``)
+        instead of ``_refresh_model_cards`` so the ComfyUI probe never blocks
+        the Tk thread."""
         source = self._function_source("_comfyui_download_done")
-        self.assertIn("self.after(3000, self._refresh_model_cards)", source)
+        self.assertIn("self.after(3000, lambda: self._schedule_model_status_refresh(force_refresh=True))", source)
 
 
 class ImageGenPromptCollapseContractTests(unittest.TestCase):

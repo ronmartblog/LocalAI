@@ -4671,6 +4671,21 @@ class App(ctk.CTk):
         self._comfyui_model_names_cache = (now, names)
         return names
 
+    def _remember_comfyui_model_file(self, model_filename: str) -> set:
+        """Update ComfyUI model-name caches from disk without probing ComfyUI.
+
+        Used on the Tk thread immediately after a download completes so the
+        Models list/detail pane can paint the just-installed file without a
+        blocking ComfyUI ``/get_model_list`` HTTP round-trip. The authoritative
+        ComfyUI probe happens later on a background thread.
+        """
+        names = set(self._local_comfyui_model_files())
+        if model_filename:
+            names.add(model_filename)
+        self._comfyui_model_names_cache = (time.time(), names)
+        self._model_detail_comfyui_model_names = set(names)
+        return names
+
     def _reload_catalog(self):
         """Re-read models_catalog.json and refresh the model cards."""
         self._catalog_models = catalog.load_catalog()
@@ -15095,6 +15110,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
             return
 
         self._stop_event.clear()
+        download_generation = self._begin_download_activity(model['name'])
         self._show_progress(True)
         self.set_status(f"Downloading {model['name']} …")
         logger.info(f"Starting ComfyUI model download: {filename}")
@@ -15104,6 +15120,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
         def _do_download():
             try:
                 import requests
+                self.after(0, lambda g=download_generation: (
+                    g == self.__dict__.get("_download_activity_generation")
+                    and self.set_status(f"Connecting to download {model['name']} ...")
+                ))
                 # Start download with streaming
                 response = requests.get(url, stream=True, timeout=30)
                 response.raise_for_status()
@@ -15116,11 +15136,16 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
                     nonlocal downloaded, last_ui_update
                     downloaded = done_bytes
 
+                    # Record heartbeat state on every chunk so the heartbeat
+                    # timer can tell a live-but-quiet download from a stall.
+                    now_mono = time.monotonic()
+                    self.__dict__["_download_last_progress_at"] = now_mono
+                    self.__dict__["_download_last_progress_bytes"] = done_bytes
+
                     # Throttle UI updates to at most 2 per second so the
                     # callback queue doesn't grow to millions of entries.
-                    now = time.monotonic()
-                    if now - last_ui_update >= 0.5:
-                        last_ui_update = now
+                    if now_mono - last_ui_update >= 0.5:
+                        last_ui_update = now_mono
                         if total_size > 0:
                             pct = downloaded / total_size
                             pct_str = f"{pct * 100:.0f}%  ({_fmt_bytes(downloaded)} / {_fmt_bytes(total_size)})"
@@ -15128,10 +15153,22 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
                             pct = 0
                             pct_str = f"{_fmt_bytes(downloaded)} downloaded"
                         msg = f"Downloading {filename}: {pct_str}"
-                        self.after(0, lambda m=msg, p=pct: (
-                            self.set_status(m),
-                            self._progress_bar.set(min(p, 1.0)),
-                        ))
+
+                        def _apply_progress(m=msg, p=pct, g=download_generation):
+                            if g != self.__dict__.get("_download_activity_generation"):
+                                return
+                            self.set_status(m)
+                            # Bytes are flowing — leave indeterminate "waiting"
+                            # mode and show real determinate progress again.
+                            try:
+                                self._progress_bar.stop()
+                                self._progress_bar.configure(mode="determinate")
+                                self._download_progress_indeterminate = False
+                            except Exception:
+                                pass
+                            self._progress_bar.set(min(p, 1.0))
+
+                        self.after(0, _apply_progress)
 
                 self._download_stream_to_path(
                     response, output_file, stop_event=self._stop_event,
@@ -15163,6 +15200,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
 
     def _comfyui_download_done(self, model: dict, success: bool, error: str = ""):
         """Handle completion of ComfyUI model download."""
+        # Invalidate the heartbeat generation so any pending heartbeat tick
+        # stops touching the progress bar before we hide it.
+        self._download_activity_generation = self.__dict__.get("_download_activity_generation", 0) + 1
         self._show_progress(False)
 
         if success:
@@ -15216,43 +15256,41 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
                 parent=self
             )
 
-        # Refresh model cards to update status
-        for card in self._model_cards:
-            if card.model == model:
-                card.refresh_status(comfyui_model_names=self._get_cached_comfyui_model_names(force_refresh=True))
-
-        # v5.5.0 UX fix: also refresh the right-pane detail view if the
-        # just-installed model is the currently-selected row. Without this,
-        # the install state on the right pane stays stale until the user
-        # clicks elsewhere and clicks back — the "click away and back"
-        # workaround Ron reported. Per perf review: call
-        # ``_update_model_detail`` directly instead of routing through
-        # ``_refresh_visible_model_status_from_snapshots`` (the per-card
-        # refresh above already handled the card list).
-        try:
-            selected_id = getattr(self, "_selected_model_id", None)
-            if selected_id and selected_id == model.get("id"):
-                self._update_model_detail(
-                    comfyui_model_names=self._get_cached_comfyui_model_names(force_refresh=False),
+        # Update the Models list + detail pane immediately from local files,
+        # then let the authoritative ComfyUI probe run on a background thread.
+        # IMPORTANT: do NOT call _get_cached_comfyui_model_names(force_refresh=True)
+        # here — when ComfyUI is running that issues a /get_model_list HTTP probe
+        # on the Tk thread and freezes the UI right after a download finishes.
+        if success:
+            try:
+                comfyui_model_names = self._remember_comfyui_model_file(model.get("comfyui_model", ""))
+                local_names, _ = self._latest_model_status_snapshots()
+                self._refresh_visible_model_status_from_snapshots(
+                    local_names=local_names,
+                    comfyui_model_names=comfyui_model_names,
                 )
-        except Exception:
-            # The detail pane may not be built yet if the install completes
-            # before the Models page has been visited — degrade silently.
-            pass
+            except Exception as exc:
+                logger.debug(f"Immediate ComfyUI download status refresh skipped: {exc}")
 
-        # v5.5.4 safety net for the install-staleness Ron reported: even
-        # with the immediate refresh above, ComfyUI's ``/get_model_list``
-        # HTTP endpoint sometimes returns a cached list that doesn't yet
-        # see the just-downloaded file (a few seconds of OS-level fs
-        # propagation + ComfyUI's own watcher latency). Schedule a second
-        # forced refresh ~3 s later so the right pane and card row catch
-        # up without the user having to click another row. Cheap and
-        # idempotent — if ComfyUI already saw the file on the first pass,
-        # the second pass paints the same state and nothing changes.
-        try:
-            self.after(3000, self._refresh_model_cards)
-        except Exception:
-            pass
+            # Authoritative refresh on a background thread (probes ComfyUI off
+            # the Tk thread), plus a second pass ~3 s later to absorb OS-level
+            # fs propagation + ComfyUI watcher latency. Cheap and idempotent.
+            self._schedule_model_status_refresh(force_refresh=True)
+            try:
+                self.after(3000, lambda: self._schedule_model_status_refresh(force_refresh=True))
+            except Exception:
+                pass
+        else:
+            # Failure: repaint card status from the last known snapshot without
+            # touching ComfyUI on the Tk thread (no new file was installed).
+            try:
+                local_names, comfyui_model_names = self._latest_model_status_snapshots()
+                self._refresh_visible_model_status_from_snapshots(
+                    local_names=local_names,
+                    comfyui_model_names=comfyui_model_names,
+                )
+            except Exception:
+                pass
 
     def open_image_gen_for_model(self, model: dict):
         """Navigate to the Image Gen page and pre-select *model*."""
@@ -19648,9 +19686,74 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
     def _show_progress(self, show: bool):
         if show:
             self._progress_bar.grid()
+            try:
+                self._progress_bar.stop()
+                self._progress_bar.configure(mode="determinate")
+                self._download_progress_indeterminate = False
+            except Exception:
+                pass
             self._progress_bar.set(0)
         else:
+            try:
+                self._progress_bar.stop()
+                self._progress_bar.configure(mode="determinate")
+                self._download_progress_indeterminate = False
+            except Exception:
+                pass
             self._progress_bar.grid_remove()
+
+    def _begin_download_activity(self, label: str) -> int:
+        """Start a non-blocking heartbeat for long downloads with no chunks yet.
+
+        Hugging Face checkpoint downloads can be silent for a long time before
+        the first byte (or between large chunks). Without a heartbeat the
+        progress bar sits at 0 and the app looks frozen even though the worker
+        thread is alive. The heartbeat reschedules itself every 5 s and is
+        keyed to a generation counter so a new/finished download cancels it.
+        """
+        generation = self.__dict__.get("_download_activity_generation", 0) + 1
+        now = time.monotonic()
+        self._download_activity_generation = generation
+        self._download_activity_started_at = now
+        self._download_last_progress_at = now
+        self._download_last_progress_bytes = 0
+        self._download_last_heartbeat_log_at = 0.0
+        self._download_heartbeat_label = label
+        self.after(5000, lambda g=generation: self._download_heartbeat(g))
+        return generation
+
+    def _download_heartbeat(self, generation: int) -> None:
+        if generation != self.__dict__.get("_download_activity_generation"):
+            return
+        thread = getattr(self, "_download_thread", None)
+        if not thread or not thread.is_alive() or self._stop_event.is_set():
+            return
+        now = time.monotonic()
+        idle_s = now - float(self.__dict__.get("_download_last_progress_at", now))
+        elapsed_s = now - float(self.__dict__.get("_download_activity_started_at", now))
+        if idle_s >= 5.0:
+            label = self.__dict__.get("_download_heartbeat_label", "model")
+            done = int(self.__dict__.get("_download_last_progress_bytes", 0) or 0)
+            if done > 0:
+                msg = (
+                    f"Downloading {label}: {_fmt_bytes(done)} received; "
+                    f"waiting for more data ({elapsed_s:.0f}s elapsed)"
+                )
+            else:
+                msg = f"Connecting to download {label} ... waiting for data ({elapsed_s:.0f}s elapsed)"
+            self.set_status(msg)
+            if not self.__dict__.get("_download_progress_indeterminate", False):
+                try:
+                    self._progress_bar.configure(mode="indeterminate")
+                    self._progress_bar.start()
+                    self._download_progress_indeterminate = True
+                except Exception:
+                    pass
+            last_log = float(self.__dict__.get("_download_last_heartbeat_log_at", 0.0) or 0.0)
+            if now - last_log >= 30.0:
+                self._download_last_heartbeat_log_at = now
+                logger.info(msg, category=logger.CATEGORY_IMAGE_GEN)
+        self.after(5000, lambda g=generation: self._download_heartbeat(g))
 
     # ── Load model for chat ───────────────────────────────────────────────────
 
