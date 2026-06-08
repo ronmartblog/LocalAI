@@ -531,6 +531,7 @@ def _inspect_hf(target: ParsedTarget, *, client: _HFClient, platform: str) -> Co
 
     size_total = sum(int(s.get("size") or 0) for s in siblings)
     pipeline_tag = info.get("pipeline_tag")
+    gated = info.get("gated")
     author = info.get("author") or target.repo_id.split("/", 1)[0]
 
     base_entry: dict[str, Any] = {
@@ -586,6 +587,35 @@ def _inspect_hf(target: ParsedTarget, *, client: _HFClient, platform: str) -> Co
             has_remote_code=has_remote_code_files,
         )
 
+    # 4.5. Masked single-file image checkpoint.  Many popular image repos ship
+    #      a Diffusers folder (model_index.json) AND the single-file
+    #      .safetensors checkpoint that ComfyUI actually loads, side by side
+    #      (DreamShaper, Realistic Vision, SD/SDXL-Turbo, SSD-1B, Juggernaut,
+    #      SDXL Base, …).  The bare-repo-URL flow used to match the Diffusers
+    #      (or OpenVINO, for SDXL Base) branch first and emit "Supported with
+    #      warnings — go find a single-file equivalent" even though that file
+    #      was right there in the same repo.  Prefer the single file: it's
+    #      LocalAI's native artifact, and the family is taken from the
+    #      authoritative model_index when present.  Only fires when a *credible*
+    #      full checkpoint exists (right size band, not a VAE/LoRA/UNet-only
+    #      component, honouring an explicitly pasted /resolve/<file> URL), so
+    #      genuine Diffusers-only repos still fall through to the warn below.
+    #      Runs BEFORE OpenVINO because image repos that also ship an OpenVINO
+    #      export (SDXL Base) must not be mistaken for an OpenVINO LLM; pure
+    #      OpenVINO LLM exports never carry an image model_index.json so they
+    #      are unaffected.
+    if "model_index.json" in files_lower:
+        root_image_files = _root_image_safetensors(siblings)
+        if root_image_files:
+            chosen = _select_primary_checkpoint(root_image_files, target, siblings)
+            if chosen is not None:
+                masked = _classify_masked_single_file(
+                    target=target, base_entry=base_entry, client=client,
+                    sha=sha, chosen=chosen, has_remote_code=has_remote_code_files,
+                )
+                if masked is not None:
+                    return masked
+
     # 5. OpenVINO IR.
     if "openvino_model.xml" in files_lower or (
         any(fn.endswith(".xml") for fn in files_lower)
@@ -601,6 +631,7 @@ def _inspect_hf(target: ParsedTarget, *, client: _HFClient, platform: str) -> Co
         return _classify_diffusers(
             target=target, base_entry=base_entry, client=client,
             sha=sha, size_total=size_total, has_remote_code=has_remote_code_files,
+            gated=gated,
         )
 
     # 7. Single-file safetensors at root (sd15- or sdxl-shaped).
@@ -818,7 +849,8 @@ _DIFFUSERS_CLASS_TO_FAMILY: dict[str, str] = {
 
 
 def _classify_diffusers(*, target: ParsedTarget, base_entry: dict, client: _HFClient,
-                        sha: str, size_total: int, has_remote_code: bool) -> CompatResult:
+                        sha: str, size_total: int, has_remote_code: bool,
+                        gated: object = None) -> CompatResult:
     raw = client.fetch_text_file(target.repo_id, "model_index.json", sha)
     class_name = None
     if raw:
@@ -828,6 +860,16 @@ def _classify_diffusers(*, target: ParsedTarget, base_entry: dict, client: _HFCl
             class_name = None
 
     if not class_name:
+        # A gated repo lets us read metadata (model_info) but blocks file
+        # content downloads until the user accepts its license, so the
+        # model_index.json read above comes back empty. Surface that as the
+        # actionable access error rather than a misleading "couldn't read".
+        if gated:
+            return _gated_result(
+                target.repo_id,
+                "Hugging Face blocked reading this repo's files because it is "
+                "gated. Accept the license on the model page, then retry.",
+            )
         return CompatResult(
             verdict="unsupported",
             reasons=[
@@ -884,6 +926,159 @@ def _classify_diffusers(*, target: ParsedTarget, base_entry: dict, client: _HFCl
         requires_trust_remote_code=has_remote_code,
         estimated_min_vram_gb=entry["min_vram_gb"],
         estimated_min_ram_gb=entry["min_ram_gb"],
+        resolved_sha=sha,
+    )
+
+
+# ── Masked single-file image checkpoint (Diffusers folder + root .safetensors) ──
+
+# Filename substrings that mark a root .safetensors as a *component* of a
+# Diffusers checkpoint (VAE, text encoder, LoRA, ControlNet, raw UNet/pipeline
+# weight export) rather than a full, ComfyUI-loadable checkpoint.
+_CKPT_AUX_TOKENS = (
+    "vae", "text_encoder", "safety_checker", "lora", "controlnet", "pytorch_model",
+)
+
+
+def _root_image_safetensors(siblings: list[dict]) -> list[dict]:
+    """Root-level (no subfolder) ``.safetensors`` siblings."""
+    out = []
+    for s in siblings:
+        fn = s.get("rfilename") or ""
+        if fn.endswith(".safetensors") and "/" not in fn:
+            out.append(s)
+    return out
+
+
+def _unet_subfolder_sizes(siblings: list[dict]) -> set[int]:
+    """Sizes of ``unet/*.safetensors`` files, used to spot a root file that is
+    actually just the UNet exported to the repo root (not a full checkpoint)."""
+    sizes: set[int] = set()
+    for s in siblings:
+        fn = (s.get("rfilename") or "").lower()
+        if fn.startswith("unet/") and fn.endswith(".safetensors"):
+            sizes.add(int(s.get("size") or 0))
+    return sizes
+
+
+def _looks_like_unet_only(sibling: dict, unet_sizes: set[int]) -> bool:
+    """True when a root file's size matches a ``unet/`` weight (±0.5%) — i.e. it
+    is a bare UNet export (e.g. ``LCM_Dreamshaper_v7_4k.safetensors``), which is
+    NOT loadable via ComfyUI ``CheckpointLoaderSimple``."""
+    sz = int(sibling.get("size") or 0)
+    if sz <= 0:
+        return False
+    for u in unet_sizes:
+        if u > 0 and abs(sz - u) <= max(1, u // 200):
+            return True
+    return False
+
+
+def _select_primary_checkpoint(root_safetensors: list[dict], target: ParsedTarget,
+                               siblings: list[dict]) -> Optional[dict]:
+    """Pick the single root checkpoint a user most likely wants, or None.
+
+    Order of preference: (1) an explicitly pasted ``/resolve/<file>`` URL,
+    (2) a credible full checkpoint in the SD/SDXL size band that is not a
+    component or bare UNet, preferring base over inpaint/refiner, then fp16,
+    then A1111-format, then the smallest standard file.
+    """
+    # An explicit /blob/ or /resolve/ file path the user pasted always wins.
+    if target.file_path:
+        for s in root_safetensors:
+            if (s.get("rfilename") or "") == target.file_path:
+                return s
+
+    unet_sizes = _unet_subfolder_sizes(siblings)
+    creds: list[dict] = []
+    for s in root_safetensors:
+        low = (s.get("rfilename") or "").lower()
+        if low == "ae.safetensors":
+            continue
+        if any(tok in low for tok in _CKPT_AUX_TOKENS):
+            continue
+        if _looks_like_unet_only(s, unet_sizes):
+            continue
+        gb = _bytes_to_gb(int(s.get("size") or 0))
+        if not (1.8 <= gb <= 9.0):
+            continue
+        creds.append(s)
+    if not creds:
+        return None
+
+    base = [
+        s for s in creds
+        if "inpaint" not in (s.get("rfilename") or "").lower()
+        and "refiner" not in (s.get("rfilename") or "").lower()
+    ]
+    pool = base or creds
+
+    def _score(s: dict) -> tuple:
+        low = (s.get("rfilename") or "").lower()
+        return (
+            0 if "fp16" in low else 1,
+            0 if "a1111" in low else 1,
+            _bytes_to_gb(int(s.get("size") or 0)),
+        )
+
+    pool.sort(key=_score)
+    return pool[0]
+
+
+def _classify_masked_single_file(*, target: ParsedTarget, base_entry: dict,
+                                 client: _HFClient, sha: str, chosen: dict,
+                                 has_remote_code: bool) -> Optional[CompatResult]:
+    """Classify a credible root single-file checkpoint that co-exists with a
+    Diffusers folder. Returns None (caller falls through to the Diffusers branch)
+    when the model_index names a known-but-unsupported pipeline family, so we
+    never promote a single file LocalAI can't actually run."""
+    chosen_name = chosen.get("rfilename") or ""
+    chosen_size = int(chosen.get("size") or 0)
+    size_gb = _bytes_to_gb(chosen_size)
+
+    # Prefer the authoritative family from the Diffusers model_index.
+    family: Optional[str] = None
+    raw = client.fetch_text_file(target.repo_id, "model_index.json", sha)
+    if raw:
+        try:
+            cls = (json.loads(raw) or {}).get("_class_name") or ""
+        except json.JSONDecodeError:
+            cls = ""
+        if cls in _DIFFUSERS_CLASS_TO_FAMILY:
+            family = _DIFFUSERS_CLASS_TO_FAMILY[cls]
+        elif cls:
+            # Known Diffusers pipeline we don't support as a single-file
+            # checkpoint (SD3, PixArt, LatentConsistency, …) — don't guess.
+            return None
+    if family is None:
+        # model_index unreadable/headless — fall back to size shape.
+        family = "sdxl" if size_gb >= 5.0 else "sd15"
+
+    template = _FAMILY_TEMPLATES[family]
+    entry = _finalize_image_entry(
+        base_entry, family=family, template=template,
+        comfyui_model=chosen_name,
+        comfyui_model_dest="checkpoints",
+        chosen_size_bytes=chosen_size,
+        hf_repo=target.repo_id,
+    )
+    return CompatResult(
+        verdict="supported",
+        reasons=[
+            f"Found a single-file {template.family_label} checkpoint "
+            f"(`{chosen_name}`, {size_gb:.1f} GB) alongside the Diffusers "
+            "folder — LocalAI will download just that file and route it through "
+            "the existing ComfyUI workflow."
+        ],
+        warnings=_image_warnings(entry, has_remote_code),
+        proposed_entry=entry,
+        backend="comfyui",
+        family=family,
+        size_bytes_total=chosen_size,
+        requires_trust_remote_code=has_remote_code,
+        estimated_min_vram_gb=entry["min_vram_gb"],
+        estimated_min_ram_gb=entry["min_ram_gb"],
+        candidate_files=_candidate_file_records([chosen_name], [chosen]),
         resolved_sha=sha,
     )
 

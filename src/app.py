@@ -247,7 +247,7 @@ except ImportError:
     PIL_AVAILABLE = False
 
 APP_TITLE = "LocalAI Studio"
-APP_VERSION = "2026.06.04.2"
+APP_VERSION = "2026.06.08.0"
 
 CHAT_RESPONSE_TOKEN_MAX = 131072
 CHAT_RESPONSE_TOKEN_ONNX_FALLBACK = 4096
@@ -1005,6 +1005,7 @@ class App(ctk.CTk):
         # State
         self.ollama = OllamaClient(self.cfg["ollama_host"])
         self.ollama_ok = False
+        self._ollama_watchdog_active = False
         self.comfyui = ComfyUIClient(self.cfg.get("comfyui_host", "http://127.0.0.1:8188"))
         self.comfyui_ok = False
         self.comfyui_process: Optional[subprocess.Popen] = None
@@ -11093,6 +11094,10 @@ class App(ctk.CTk):
     #   - End of _apply_gpu_detection_result (sets the NVIDIA-CPU flag)
     #   - End of _check_ollama_async (sets self.ollama_ok)
     #   - End of _try_start_ollama (may flip self.ollama_ok)
+    #   - _mark_ollama_running, called by the background watchdog
+    #     (_start_ollama_watchdog) whenever Ollama answers AFTER the one-shot
+    #     startup probe — this is what self-heals a stuck banner on slow
+    #     or virtualized hosts and on manual Ollama starts.
 
     def _build_setup_warning_banner(self) -> None:
         """Create the incomplete-setup warning banner.
@@ -11288,31 +11293,94 @@ class App(ctk.CTk):
     def _check_ollama_async(self):
         def _check():
             if self.ollama.is_running():
-                self.ollama_ok = True
                 ver = self.ollama.version()
-                self.after(0, lambda: self._ollama_status_label.configure(
-                    text=f"Ollama v{ver} running", text_color=SUCCESS_TEXT
-                ))
                 logger.info(f"Ollama running (v{ver}) at {self.cfg['ollama_host']}")
+                self.after(0, lambda v=ver: self._mark_ollama_running(v))
+                return
+
+            self.ollama_ok = False
+            if self.cfg.get("auto_start_ollama"):
+                self.after(0, lambda: self._ollama_status_label.configure(
+                    text="Starting Ollama …", text_color=WARN_TEXT
+                ))
+                self._try_start_ollama()
             else:
-                self.ollama_ok = False
-                if self.cfg.get("auto_start_ollama"):
-                    self.after(0, lambda: self._ollama_status_label.configure(
-                        text="Starting Ollama …", text_color=WARN_TEXT
-                    ))
-                    self._try_start_ollama()
-                else:
-                    self.after(0, lambda: self._ollama_status_label.configure(
-                        text="Ollama not running.\nInstall from ollama.com",
-                        text_color=TEXT_MUTED
-                    ))
-                    logger.warning("Ollama is not running. Download it from https://ollama.com")
+                self.after(0, lambda: self._ollama_status_label.configure(
+                    text="Ollama not running.\nInstall from ollama.com",
+                    text_color=TEXT_MUTED
+                ))
+                logger.warning("Ollama is not running. Download it from https://ollama.com")
             # v2026.06.01.10: refresh the in-app incomplete-setup banner
             # whenever the Ollama probe completes. self.ollama_ok is now
             # authoritative, so banner can show/hide accordingly.
             self.after(0, self._refresh_setup_warning_banner)
+            # v2026.06.05.0: the one-shot probe above (and the one-shot
+            # auto-start below) used to be the ONLY chance to mark Ollama up.
+            # On slow or virtualized hosts `ollama serve` routinely needs more
+            # than a few seconds to bind its HTTP port, so ollama_ok latched
+            # False forever and the incomplete-setup banner stayed stuck even
+            # after Ollama finished starting. Kick off a background watchdog
+            # that keeps re-probing and clears the banner the moment Ollama
+            # answers (also covers the user starting Ollama by hand later).
+            self._start_ollama_watchdog()
 
         threading.Thread(target=_check, daemon=True).start()
+
+    def _mark_ollama_running(self, ver: str = "unknown") -> None:
+        """Mark Ollama as up and clear the incomplete-setup banner.
+
+        UI-thread only — performs no network I/O (callers fetch the version
+        string on their worker thread and pass it in). Idempotent and safe to
+        call from both the startup probe and the background watchdog.
+        """
+        self.ollama_ok = True
+        try:
+            self._ollama_status_label.configure(
+                text=f"Ollama v{ver} running", text_color=SUCCESS_TEXT
+            )
+        except Exception:
+            pass
+        self._refresh_setup_warning_banner()
+
+    def _start_ollama_watchdog(self) -> None:
+        """Re-probe Ollama in the background until it answers, then self-heal.
+
+        Guarded so only one watchdog runs at a time. Polls roughly every 8s
+        for up to ~6 minutes with the client's cheap 3s-timeout GET; stops as
+        soon as Ollama responds (or as soon as some other path has already set
+        ``ollama_ok``). This is the fix for the banner that would otherwise
+        never go away once the single startup check missed a slow-starting
+        Ollama (see ``_check_ollama_async``).
+        """
+        if getattr(self, "_ollama_watchdog_active", False):
+            return
+        self._ollama_watchdog_active = True
+
+        def _watch():
+            try:
+                deadline = time.monotonic() + 360
+                while time.monotonic() < deadline:
+                    if getattr(self, "ollama_ok", False):
+                        return
+                    try:
+                        running = self.ollama.is_running()
+                    except Exception:
+                        running = False
+                    if running:
+                        try:
+                            ver = self.ollama.version()
+                        except Exception:
+                            ver = "unknown"
+                        logger.info(
+                            f"Ollama came up after startup (v{ver}); clearing setup banner."
+                        )
+                        self.after(0, lambda v=ver: self._mark_ollama_running(v))
+                        return
+                    time.sleep(8)
+            finally:
+                self._ollama_watchdog_active = False
+
+        threading.Thread(target=_watch, daemon=True).start()
 
     def _try_start_ollama(self):
         def _start():
@@ -11324,26 +11392,25 @@ class App(ctk.CTk):
                 if sys.platform == "win32":
                     popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
                 subprocess.Popen(["ollama", "serve"], **popen_kwargs)
-                time.sleep(3)
-                if self.ollama.is_running():
-                    self.ollama_ok = True
-                    self.after(0, lambda: self._ollama_status_label.configure(
-                        text=f"Ollama started", text_color=SUCCESS_TEXT
-                    ))
-                    logger.info("Ollama started successfully.")
-                else:
-                    self.after(0, lambda: self._ollama_status_label.configure(
-                        text="Ollama not found.\nGet it at ollama.com", text_color=TEXT_MUTED
-                    ))
-                    logger.warning("Could not start Ollama. Is it installed?")
+                logger.info("Launched 'ollama serve'; waiting for it to come up …")
+                self.after(0, lambda: self._ollama_status_label.configure(
+                    text="Starting Ollama …", text_color=WARN_TEXT
+                ))
+                # v2026.06.05.0: readiness is now confirmed by the background
+                # watchdog (_start_ollama_watchdog), not a single fixed 3s
+                # sleep+check. `ollama serve` can take well over 3s to bind its
+                # port on slow or virtualized hosts; the old one-shot check
+                # latched ollama_ok=False permanently and left the
+                # incomplete-setup banner stuck on forever.
+                self._start_ollama_watchdog()
             except FileNotFoundError:
                 self.after(0, lambda: self._ollama_status_label.configure(
                     text="Ollama not installed.\nGet it at ollama.com", text_color=TEXT_MUTED
                 ))
                 logger.warning("Ollama executable not found. Download from https://ollama.com")
-            # v2026.06.01.10: refresh the incomplete-setup banner after the
-            # auto-start attempt finishes — self.ollama_ok may have flipped.
-            self.after(0, self._refresh_setup_warning_banner)
+                # Refresh the incomplete-setup banner so it reflects the
+                # "Ollama missing" state immediately.
+                self.after(0, self._refresh_setup_warning_banner)
         threading.Thread(target=_start, daemon=True).start()
 
     # ── ComfyUI management ────────────────────────────────────────────────────
@@ -19198,15 +19265,26 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
         import re as _re
         step_m = _re.search(r"step (\d+)/(\d+)", msg)
         if step_m:
-            self._img_progress_row.grid()
-            self._img_progress_bar.grid()
-            self._img_elapsed_lbl.grid()
-            step, total = int(step_m.group(1)), int(step_m.group(2))
-            frac = step / total if total > 0 else 0
-            if self._img_progress_bar.cget("mode") != "determinate":
-                self._img_progress_bar.stop()
-                self._img_progress_bar.configure(mode="determinate")
-            self._img_progress_bar.set(frac)
+            # v2026.06.05.0: every widget touch below is now guarded. These
+            # run on the Tk main thread via after(0, …) on EVERY render step;
+            # if the Image Gen page was rebuilt mid-generation (theme change,
+            # re-layout) the widgets go stale and an unguarded .grid()/.set()
+            # raises on the UI thread — which on some CTk/Tk builds takes the
+            # whole process down (same hard-crash class the _img_safe_clear_*
+            # helpers already defend against). Never let a progress tick crash
+            # an otherwise-successful render.
+            try:
+                self._img_progress_row.grid()
+                self._img_progress_bar.grid()
+                self._img_elapsed_lbl.grid()
+                step, total = int(step_m.group(1)), int(step_m.group(2))
+                frac = step / total if total > 0 else 0
+                if self._img_progress_bar.cget("mode") != "determinate":
+                    self._img_progress_bar.stop()
+                    self._img_progress_bar.configure(mode="determinate")
+                self._img_progress_bar.set(frac)
+            except Exception:
+                pass  # progress widgets mid-transition; non-critical
 
         # Update the big display area so the user sees activity
         elapsed = int(time.time() - self._img_elapsed_start) if self._img_elapsed_start > 0 else 0
@@ -19229,8 +19307,17 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
         self._img_waiting_for_comfyui_generation = False
         self._img_bytes = img_bytes
         self._set_image_gen_enabled(self.comfyui_ok)
-        self._img_stop_btn.configure(state="disabled")
-        self._img_save_btn.configure(state="normal")
+        # v2026.06.05.0: guard the button reconfigures — this runs on the Tk
+        # thread via after(0, …) at render completion; a stale/missing widget
+        # (page rebuilt mid-render) must not raise and crash the UI thread.
+        try:
+            self._img_stop_btn.configure(state="disabled")
+        except Exception:
+            pass
+        try:
+            self._img_save_btn.configure(state="normal")
+        except Exception:
+            pass
         # imagegen-prompt-collapse: free vertical room for the freshly rendered
         # image when the window isn't maximized. No-op when maximized (there's
         # already room for both prompt and image) and no-op if already collapsed.
@@ -19304,7 +19391,13 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
         self._img_stop_progress()
         self._img_waiting_for_comfyui_generation = False
         self._set_image_gen_enabled(self.comfyui_ok)
-        self._img_stop_btn.configure(state="disabled")
+        # v2026.06.05.0: guard the button reconfigure — runs on the Tk thread
+        # via after(0, …); a stale/missing widget must not raise here and turn
+        # a recoverable generation failure into a UI-thread crash.
+        try:
+            self._img_stop_btn.configure(state="disabled")
+        except Exception:
+            pass
         short_err = (error[:120] + " …") if len(error) > 120 else error
         self._img_set_status(f"FAILED: {short_err}", color=ERROR_TEXT)
         self._img_safe_clear_display(

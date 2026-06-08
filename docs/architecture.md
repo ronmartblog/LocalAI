@@ -177,7 +177,7 @@ python -c "from src.app import App; app=App(); app.update(); app._switch_page('b
 ## 8. Build and release
 
 ```bash
-git clone https://github.com/<owner>/localai.git
+git clone https://github.com/ronmartblog/localai.git
 cd localai
 setup.bat       # installs Python deps + ComfyUI
 run.bat

@@ -361,6 +361,171 @@ class SingleFileSafetensors(unittest.TestCase):
         self.assertEqual(result.verdict, "unsupported")
 
 
+# ── Masked single-file (Diffusers folder + root single-file checkpoint) ──────
+
+
+class MaskedSingleFileCheckpoint(unittest.TestCase):
+    """Repos that ship BOTH a Diffusers folder and the single-file checkpoint
+    ComfyUI actually loads must resolve to the single file (supported), not the
+    Diffusers warn. This is the dominant bare-repo-URL false negative on popular
+    image models (DreamShaper, Realistic Vision, SD/SDXL-Turbo, SSD-1B, …)."""
+
+    def _client(self, class_name, *extra_files, **info_extra):
+        siblings = [("model_index.json", 500),
+                    ("unet/diffusion_pytorch_model.safetensors", 3_438_000_000),
+                    ("vae/diffusion_pytorch_model.safetensors", 334_000_000)]
+        siblings.extend(extra_files)
+        return FakeHFClient(
+            info={
+                "sha": SHA,
+                "siblings": _siblings(*siblings),
+                "pipeline_tag": "text-to-image",
+                "author": "someorg",
+                **info_extra,
+            },
+            model_index_text=json.dumps({"_class_name": class_name}),
+        )
+
+    def test_sd15_single_file_preferred_over_diffusers(self):
+        # DreamShaper-8-LCM shape: SD1.5 Diffusers folder + 2 GB merged ckpt.
+        client = self._client(
+            "StableDiffusionPipeline",
+            ("DreamShaper8_LCM.safetensors", 2_133_804_992),
+        )
+        result = inspect(_hf("Lykon/dreamshaper-8-lcm"), client=client)
+        self.assertEqual(result.verdict, "supported")
+        self.assertEqual(result.family, "sd15")
+        self.assertEqual(
+            result.proposed_entry.get("comfyui_model"),
+            "DreamShaper8_LCM.safetensors",
+        )
+        _assert_image_schema(self, result.proposed_entry)
+        _assert_sha_pinned(self, result.proposed_entry)
+
+    def test_family_comes_from_model_index_not_size(self):
+        # SSD-1B is a distilled SDXL at ~4.5 GB — the size heuristic alone would
+        # call it sd15, but the authoritative model_index says SDXL.
+        client = self._client(
+            "StableDiffusionXLPipeline",
+            ("SSD-1B-A1111.safetensors", 4_470_000_000),
+            ("SSD-1B.safetensors", 4_470_000_000),
+        )
+        result = inspect(_hf("segmind/SSD-1B"), client=client)
+        self.assertEqual(result.verdict, "supported")
+        self.assertEqual(result.family, "sdxl")
+
+    def test_fp16_variant_preferred(self):
+        # SDXL-Turbo ships fp32 (13.9 GB, out of band) + fp16 (6.9 GB).
+        client = self._client(
+            "StableDiffusionXLPipeline",
+            ("sd_xl_turbo_1.0.safetensors", 13_900_000_000),
+            ("sd_xl_turbo_1.0_fp16.safetensors", 6_940_000_000),
+        )
+        result = inspect(_hf("stabilityai/sdxl-turbo"), client=client)
+        self.assertEqual(result.verdict, "supported")
+        self.assertEqual(
+            result.proposed_entry.get("comfyui_model"),
+            "sd_xl_turbo_1.0_fp16.safetensors",
+        )
+
+    def test_base_preferred_over_inpainting(self):
+        client = self._client(
+            "StableDiffusionPipeline",
+            ("Realistic_Vision_V6.0_NV_B1_inpainting_fp16.safetensors", 2_140_000_000),
+            ("Realistic_Vision_V6.0_NV_B1_fp16.safetensors", 2_130_000_000),
+        )
+        result = inspect(_hf("SG161222/Realistic_Vision_V6.0_B1_noVAE"), client=client)
+        self.assertEqual(result.verdict, "supported")
+        self.assertEqual(
+            result.proposed_entry.get("comfyui_model"),
+            "Realistic_Vision_V6.0_NV_B1_fp16.safetensors",
+        )
+
+    def test_explicit_pasted_file_wins(self):
+        client = self._client(
+            "StableDiffusionXLPipeline",
+            ("sd_xl_turbo_1.0.safetensors", 13_900_000_000),
+            ("sd_xl_turbo_1.0_fp16.safetensors", 6_940_000_000),
+        )
+        target = ParsedTarget(
+            route="hf", repo_id="stabilityai/sdxl-turbo",
+            file_path="sd_xl_turbo_1.0_fp16.safetensors",
+        )
+        result = inspect(target, client=client)
+        self.assertEqual(result.verdict, "supported")
+        self.assertEqual(
+            result.proposed_entry.get("comfyui_model"),
+            "sd_xl_turbo_1.0_fp16.safetensors",
+        )
+
+    def test_unet_only_root_file_is_not_treated_as_checkpoint(self):
+        # LCM_Dreamshaper_v7 ships a bare UNet at the root whose size equals the
+        # unet/ subfolder weight — NOT a loadable single-file checkpoint. Must
+        # fall through to the (unsupported LatentConsistency) Diffusers branch.
+        client = self._client(
+            "LatentConsistencyModelPipeline",
+            ("LCM_Dreamshaper_v7_4k.safetensors", 3_438_000_000),
+        )
+        result = inspect(_hf("SimianLuo/LCM_Dreamshaper_v7"), client=client)
+        self.assertEqual(result.verdict, "unsupported")
+        self.assertIsNone(result.proposed_entry.get("comfyui_model"))
+
+    def test_component_only_root_files_fall_through_to_warn(self):
+        # A genuine Diffusers repo whose only root .safetensors are components
+        # (vae, text encoder) must still warn — there is no real single file.
+        client = self._client(
+            "StableDiffusionPipeline",
+            ("vae.safetensors", 334_000_000),
+        )
+        result = inspect(_hf("some/diffusers-only"), client=client)
+        self.assertEqual(result.verdict, "warn")
+        self.assertEqual(result.proposed_entry.get("comfyui_model"), "")
+
+    def test_unsupported_family_with_single_file_does_not_promote(self):
+        # Even with a credible-sized root file, a known-unsupported pipeline
+        # family (SD3) must not be promoted to supported.
+        client = self._client(
+            "StableDiffusion3Pipeline",
+            ("sd3_medium.safetensors", 4_500_000_000),
+        )
+        result = inspect(_hf("stabilityai/stable-diffusion-3-medium"), client=client)
+        self.assertEqual(result.verdict, "unsupported")
+
+    def test_openvino_image_repo_prefers_single_file(self):
+        # SDXL Base ships an OpenVINO export alongside the real checkpoint;
+        # it must resolve to the single file, not be mistaken for an OpenVINO LLM.
+        client = self._client(
+            "StableDiffusionXLPipeline",
+            ("sd_xl_base_1.0.safetensors", 6_940_000_000),
+            ("openvino_model.xml", 50_000),
+            ("openvino_model.bin", 6_900_000_000),
+        )
+        result = inspect(_hf("stabilityai/stable-diffusion-xl-base-1.0"), client=client)
+        self.assertEqual(result.verdict, "supported")
+        self.assertEqual(result.family, "sdxl")
+        self.assertEqual(
+            result.proposed_entry.get("comfyui_model"), "sd_xl_base_1.0.safetensors")
+
+    def test_gated_diffusers_unreadable_reports_needs_access(self):
+        # Gated repo: model_info succeeds but model_index.json can't be read.
+        # Must surface needs_access, not a misleading "couldn't read" unsupported.
+        client = FakeHFClient(
+            info={
+                "sha": SHA,
+                "siblings": _siblings(
+                    ("model_index.json", 500),
+                    ("flux1-dev.safetensors", 23_800_000_000),  # out of band
+                ),
+                "pipeline_tag": "text-to-image", "author": "black-forest-labs",
+                "gated": "manual",
+            },
+            model_index_text=None,  # gated content read blocked
+        )
+        result = inspect(_hf("black-forest-labs/FLUX.1-dev"), client=client)
+        self.assertEqual(result.verdict, "needs_access")
+        self.assertTrue(result.is_install_blocked)
+
+
 # ── Phase 1 / text-gen fallbacks ────────────────────────────────────────────
 
 

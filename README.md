@@ -62,7 +62,7 @@ A quick tour of what LocalAI Studio looks like in use.
 ### Windows
 
 ```cmd
-git clone https://github.com/<owner>/localai.git
+git clone https://github.com/ronmartblog/localai.git
 cd localai
 setup.bat
 run.bat
