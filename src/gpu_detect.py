@@ -120,9 +120,16 @@ def is_snapdragon_arm64() -> bool:
 class GPUInfo:
     """Information about available GPU acceleration."""
 
-    def __init__(self, gpu_type: GPUType, device_name: str = ""):
+    def __init__(self, gpu_type: GPUType, device_name: str = "",
+                 npu_name: str = "", npu_devices: "Optional[list]" = None):
         self.gpu_type = gpu_type
         self.device_name = device_name
+        # NPU is supplementary, not a replacement for ``gpu_type`` (ComfyUI
+        # image-gen still routes through DirectML/CUDA). These fields let the
+        # Chat dropdown default, Settings panel, and benchmark capacity checks
+        # route OpenVINO chat workloads onto an Intel NPU when one is present.
+        self.npu_name = npu_name
+        self.npu_devices = list(npu_devices) if npu_devices else []
 
     @property
     def vram_gb(self) -> float:
@@ -430,7 +437,55 @@ def _apple_gpu_name() -> Optional[str]:
     return None
 
 
+def _detect_npu_info() -> "tuple":
+    """Best-effort Intel NPU enumeration via OpenVINO. Returns ``(name, devices)``,
+    or ``("", [])`` when no NPU / OpenVINO is present. Never raises."""
+    if sys.platform != "win32":
+        return "", []
+    try:
+        from src import openvino_client
+    except Exception:
+        return "", []
+    if not getattr(openvino_client, "OV_GENAI_AVAILABLE", False):
+        return "", []
+    try:
+        devices = openvino_client.available_ov_devices()
+    except Exception:
+        return "", []
+    if "NPU" not in devices:
+        return "", []
+    try:
+        name = openvino_client.ov_device_full_name("NPU")
+    except Exception:
+        name = "NPU"
+    return (name or "NPU"), list(devices)
+
+
+def _augment_npu(info: "GPUInfo") -> None:
+    """Populate ``info.npu_name`` / ``info.npu_devices`` and log once when an
+    NPU is found. Supplementary to ``gpu_type`` — does not change it."""
+    name, devices = _detect_npu_info()
+    info.npu_name = name
+    info.npu_devices = devices
+    if name:
+        logger.info(f"Detected NPU: {name}")
+
+
 def detect_gpu(auto_fix: bool = False) -> GPUInfo:
+    """Detect the best GPU backend and augment it with NPU presence.
+
+    Thin public wrapper over :func:`_detect_gpu_impl`. The base call decides
+    ``gpu_type`` (CUDA / DirectML / MPS / CPU); this wrapper additionally
+    enumerates an Intel NPU via OpenVINO (Windows only) and records it on the
+    returned :class:`GPUInfo` so the rest of the app can route OpenVINO chat
+    workloads onto the NPU without re-probing.
+    """
+    info = _detect_gpu_impl(auto_fix=auto_fix)
+    _augment_npu(info)
+    return info
+
+
+def _detect_gpu_impl(auto_fix: bool = False) -> GPUInfo:
     """
     Detect the best available GPU acceleration method.
 
@@ -622,7 +677,9 @@ def detect_gpu_cached(
                         f"GPU cache hit ({gtype}: {dname}, "
                         f"age={age_h:.1f}h)"
                     )
-                    return GPUInfo(gtype, dname)
+                    info = GPUInfo(gtype, dname)
+                    _augment_npu(info)
+                    return info
                 logger.debug(
                     f"GPU cache stale or unusable (type={gtype}, age={age_h:.1f}h) — re-detecting"
                 )

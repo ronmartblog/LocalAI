@@ -566,7 +566,8 @@ class QuickChatUltraSmallBaselineContractTests(unittest.TestCase):
         from src.catalog import MODELS
 
         catalog_ultra_small = {
-            m["id"] for m in MODELS if m.get("category") == "Ultra Small"
+            m["id"] for m in MODELS
+            if m.get("category") == "Ultra Small" and m.get("backend") != "openvino"
         }
         raw = json.loads(self.SKUS_PATH.read_text(encoding="utf-8"))
         baselines = raw.get("bench_defaults", {}).get("baselines", {})

@@ -5344,16 +5344,19 @@ class BenchmarkQuickFallbackContractTests(unittest.TestCase):
         capacity = self._capacity(has_gpu=False)
         fallback = _bench_quick_fallback_model_ids(has_gpu=False)
         # The fallback set on a CPU box must equal the catalog's Ultra
-        # Small chat models — no image-gen, no Small or Medium chat.
+        # Small chat models — no image-gen, no Small or Medium chat, and no
+        # OpenVINO/NPU models (they need an Intel NPU + the OpenVINO runtime
+        # and aren't part of the default Quick benchmark).
         catalog_ultra_small = {
-            m["id"] for m in catalog.MODELS if m.get("category") == "Ultra Small"
+            m["id"] for m in catalog.MODELS
+            if m.get("category") == "Ultra Small" and m.get("backend") != "openvino"
         }
         self.assertEqual(fallback, catalog_ultra_small)
         self.assertNotIn(_BENCH_QUICK_FALLBACK_IMAGE_GEN_ID, fallback)
 
         # Every Ultra Small chat model default-ticks under Quick.
         for m in catalog.MODELS:
-            if m.get("category") != "Ultra Small":
+            if m.get("category") != "Ultra Small" or m.get("backend") == "openvino":
                 continue
             self.assertTrue(
                 app._bench_default_selected_for_model(m, capacity),
@@ -5391,7 +5394,8 @@ class BenchmarkQuickFallbackContractTests(unittest.TestCase):
         # Ultra Small chat baseline.
         gpu_fallback = _bench_quick_fallback_model_ids(has_gpu=True)
         catalog_ultra_small = {
-            m["id"] for m in catalog.MODELS if m.get("category") == "Ultra Small"
+            m["id"] for m in catalog.MODELS
+            if m.get("category") == "Ultra Small" and m.get("backend") != "openvino"
         }
         self.assertEqual(
             gpu_fallback, catalog_ultra_small | {_BENCH_QUICK_FALLBACK_IMAGE_GEN_ID}
@@ -6127,6 +6131,61 @@ class OrphanBlobSweepAfterDeleteContractTests(unittest.TestCase):
             "Sweep must be gated on `if succeeded:` so a fully-failed "
             "bulk delete doesn't suddenly prompt for orphan cleanup.",
         )
+
+
+class NpuBackendDropdownContractTests(unittest.TestCase):
+    """v2026.06 NPU support: the Chat backend dropdown must offer explicit
+    NPU and iGPU OpenVINO entries (replacing the merged 'OpenVINO (GPU/NPU)'
+    and the misleading 'NPU/OpenVINO (ONNX)' labels), and the OV loader must
+    route the selected device + a CACHE_DIR."""
+
+    def test_dropdown_has_split_openvino_entries(self):
+        self.assertIn('"NPU (OpenVINO)"', APP_TEXT)
+        self.assertIn('"iGPU (OpenVINO)"', APP_TEXT)
+        self.assertIn('"ONNX (DirectML)"', APP_TEXT)
+        # The old merged / misleading labels must be gone from the dropdown.
+        self.assertNotIn('"OpenVINO (GPU/NPU)"', APP_TEXT)
+        self.assertNotIn('"NPU/OpenVINO (ONNX)"', APP_TEXT)
+
+    def test_load_ov_model_routes_device_and_cache_dir(self):
+        tree = ast.parse(APP_TEXT)
+        lines = APP_TEXT.splitlines()
+        src = ""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_load_ov_model":
+                src = "\n".join(lines[node.lineno - 1: node.end_lineno])
+                break
+        self.assertTrue(src, "_load_ov_model not found")
+        # Honors the explicit device from the dropdown (not hardcoded GPU).
+        self.assertIn("pick_ov_device(device_pref)", src)
+        self.assertNotIn('pick_ov_device("GPU")', src)
+        # Always passes a CACHE_DIR so NPU cold-compile happens once per upgrade.
+        self.assertIn("cache_dir=ov_cache_dir", src)
+        self.assertIn("ov_cache", src)
+
+    def test_test_npu_runs_compile_in_isolated_subprocess(self):
+        """The Settings 'Test NPU' button MUST run the OpenVINO compile +
+        inference in a separate process with a timeout. Running it in-process
+        (even on a worker thread) freezes the Tk UI because the NPU compile
+        holds the GIL and can hang — exactly the 'Not Responding' regression
+        this guards against."""
+        tree = ast.parse(APP_TEXT)
+        lines = APP_TEXT.splitlines()
+        src = ""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_test_npu":
+                src = "\n".join(lines[node.lineno - 1: node.end_lineno])
+                break
+        self.assertTrue(src, "_test_npu not found")
+        # Isolated subprocess invocation of the OV probe with a hard timeout.
+        self.assertIn("src.openvino_client", src)
+        self.assertIn("subprocess.run", src)
+        self.assertIn("timeout", src)
+        self.assertIn("TimeoutExpired", src)
+        # Re-entry guard so a second click can't stack concurrent NPU compiles.
+        self.assertIn("_npu_test_running", src)
+        # Must NOT construct an OVModelSession in-process on the UI app thread.
+        self.assertNotIn("OVModelSession(", src)
 
 
 if __name__ == "__main__":

@@ -42,17 +42,36 @@ def available_ov_devices() -> list[str]:
 
 
 def pick_ov_device(prefer: str = "GPU") -> str:
-    """Return the best available OpenVINO device. Priority: GPU > NPU > CPU.
+    """Return the best available OpenVINO device.
 
-    NPU is intentionally deprioritised because the VPUX compiler may crash the
-    process (calling exit()) on models it cannot compile.  GPU is fast and
-    reliable; NPU can still be selected explicitly by passing prefer='NPU'.
+    An explicit *prefer* is always honored when that device is actually
+    present (so ``pick_ov_device("NPU")`` returns ``"NPU"`` on a Panther
+    Lake / Lunar Lake / Meteor Lake box). When *prefer* is unavailable the
+    fallback order is GPU > NPU > CPU: GPU is fast and reliable, NPU can
+    still be selected explicitly, and CPU is the universal floor.
     """
     devices = available_ov_devices()
     for dev in (prefer, "GPU", "NPU", "CPU"):
         if dev in devices:
             return dev
     return "CPU"
+
+
+def ov_device_full_name(device: str) -> str:
+    """Return the OpenVINO ``FULL_DEVICE_NAME`` for *device* (e.g. the NPU's
+    ``Intel(R) AI Boost``), or the bare device id when the property can't be
+    read. Best-effort: never raises."""
+    if not OV_GENAI_AVAILABLE:
+        return device
+    try:
+        global _OV_CORE
+        if _OV_CORE is None:
+            available_ov_devices()  # constructs and caches the Core
+        if _OV_CORE is None:
+            return device
+        return str(_OV_CORE.get_property(device, "FULL_DEVICE_NAME"))
+    except Exception:
+        return device
 
 
 class OVModelSession:
@@ -64,7 +83,8 @@ class OVModelSession:
     the model it automatically falls back to GPU then CPU.
     """
 
-    def __init__(self, model_dir: str | Path, device: str = "NPU"):
+    def __init__(self, model_dir: str | Path, device: str = "NPU",
+                 cache_dir: "str | Path | None" = None):
         if not OV_GENAI_AVAILABLE:
             raise OVError(
                 "openvino-genai is not installed. "
@@ -74,16 +94,29 @@ class OVModelSession:
 
         model_dir = str(model_dir)
         fallback_order = _fallback_chain(device)
-        last_err = None
+        errors: list[str] = []
         for dev in fallback_order:
+            # CACHE_DIR makes the expensive first NPU/GPU compile happen once
+            # per model upgrade instead of once per launch (cold ~30-60 s →
+            # warm ~2-3 s). Without it every restart looks like a hang.
+            props = _ov_pipeline_properties(dev, cache_dir)
             try:
-                self._pipe = ov_genai.LLMPipeline(model_dir, dev)
+                t0 = time.perf_counter()
+                if props:
+                    self._pipe = ov_genai.LLMPipeline(model_dir, dev, props)
+                else:
+                    self._pipe = ov_genai.LLMPipeline(model_dir, dev)
+                elapsed = time.perf_counter() - t0
                 self._device = dev
+                cache_state = "cache hit" if elapsed < 8.0 else "cache miss"
+                _log_compile(dev, elapsed, cache_state)
                 return
             except Exception as e:
-                last_err = e
+                errors.append(f"{dev}: {type(e).__name__}: {e}")
                 continue
-        raise OVError(f"Failed to load model on any device: {last_err}") from last_err
+        tried = ", ".join(fallback_order)
+        summary = " | ".join(errors) or "no devices available"
+        raise OVError(f"Failed to load model on {tried}. Details — {summary}")
 
     # ── Streaming helpers ─────────────────────────────────────────────────────
 
@@ -255,6 +288,52 @@ def download_ov_model(
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
+def _ov_pipeline_properties(device: str, cache_dir: "str | Path | None") -> dict:
+    """Build the OpenVINO LLMPipeline property dict for *device*.
+
+    Always sets ``CACHE_DIR`` when a cache directory is provided. For the NPU
+    it additionally feature-detects safe acceleration hints by querying
+    ``SUPPORTED_PROPERTIES`` and only sets hints the installed runtime
+    actually exposes — this avoids version-skew breakage across OpenVINO
+    releases.
+    """
+    props: dict = {}
+    if cache_dir is not None:
+        try:
+            Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        props["CACHE_DIR"] = str(cache_dir)
+
+    if device == "NPU" and OV_GENAI_AVAILABLE:
+        supported: list[str] = []
+        try:
+            global _OV_CORE
+            if _OV_CORE is None:
+                available_ov_devices()
+            if _OV_CORE is not None:
+                supported = list(_OV_CORE.get_property("NPU", "SUPPORTED_PROPERTIES"))
+        except Exception:
+            supported = []
+        # Only set hints the runtime advertises.
+        for key, value in (("NPU_USE_NPUW", "YES"),):
+            if key in supported:
+                props[key] = value
+    return props
+
+
+def _log_compile(device: str, elapsed: float, cache_state: str) -> None:
+    """Log a single OV compile line; tolerant of a missing logger import."""
+    try:
+        from src import logger as _logger
+        _logger.info(
+            f"OV compile on {device}: {elapsed:.1f}s ({cache_state})",
+            category=_logger.CATEGORY_SYSTEM,
+        )
+    except Exception:
+        pass
+
+
 def _fallback_chain(preferred: str) -> list[str]:
     """Return devices to try in order, starting from preferred."""
     order = ["NPU", "GPU", "CPU"]
@@ -262,3 +341,44 @@ def _fallback_chain(preferred: str) -> list[str]:
         idx = order.index(preferred)
         return order[idx:] + order[:idx]
     return [preferred] + [d for d in order if d != preferred]
+
+
+def _cli_probe(model_dir: str, device: str, cache_dir: str, max_tokens: int) -> dict:
+    """Compile *model_dir* on *device* and run a short generate, returning a
+    JSON-serialisable result dict. Used by the Settings 'Test NPU' button via a
+    subprocess so the (GIL-holding, occasionally-hanging) NPU compile can never
+    freeze the desktop UI."""
+    t0 = time.perf_counter()
+    session = OVModelSession(model_dir, device, cache_dir=cache_dir or None)
+    compile_s = time.perf_counter() - t0
+    ntok = 0
+    tps = 0.0
+    for _tok, stats in session.generate_stream_timed(
+        "Hello, how are you?", max_new_tokens=max_tokens
+    ):
+        if stats:
+            ntok = stats["token_count"]
+            tps = stats["tokens_per_sec"]
+    return {
+        "ok": True,
+        "device": getattr(session, "_device", device),
+        "compile_s": compile_s,
+        "ntok": ntok,
+        "tps": tps,
+    }
+
+
+if __name__ == "__main__":
+    # Subprocess entry point: python -m src.openvino_client <model_dir> <device> <cache_dir> [max_tokens]
+    import json as _json
+    import sys as _sys
+
+    try:
+        _model_dir = _sys.argv[1]
+        _device = _sys.argv[2] if len(_sys.argv) > 2 else "NPU"
+        _cache_dir = _sys.argv[3] if len(_sys.argv) > 3 else ""
+        _max_tokens = int(_sys.argv[4]) if len(_sys.argv) > 4 else 16
+        _result = _cli_probe(_model_dir, _device, _cache_dir, _max_tokens)
+        print(_json.dumps(_result))
+    except Exception as _exc:  # noqa: BLE001 — surface any failure as a JSON result
+        print(_json.dumps({"ok": False, "error": f"{type(_exc).__name__}: {_exc}"}))

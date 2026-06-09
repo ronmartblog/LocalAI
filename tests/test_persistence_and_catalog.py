@@ -411,6 +411,37 @@ class CatalogTests(unittest.TestCase):
         )
         self.assertEqual(catalog.IMAGE_GEN_MIN_CPU_RAM_GB, 12)
 
+    def test_openvino_entries_well_formed(self):
+        """Every backend=openvino catalog entry MUST declare ov_repo, a pinned
+        40-char hf_revision SHA, and a recommended_device in {NPU,GPU,CPU}.
+        Both models_catalog.json and the built-in MODELS fallback are checked."""
+        import re
+        root = self._repo_root()
+        active = catalog.load_catalog(root / "models_catalog.json")
+        sources = {"models_catalog.json": active, "catalog.MODELS": catalog.MODELS}
+        seen_ov = 0
+        for label, models in sources.items():
+            for m in models:
+                if m.get("backend") != "openvino":
+                    continue
+                seen_ov += 1
+                mid = m.get("id", "?")
+                with self.subTest(source=label, model=mid):
+                    self.assertTrue(m.get("ov_repo"), f"{mid} missing ov_repo")
+                    sha = str(m.get("hf_revision") or "")
+                    self.assertRegex(
+                        sha, r"^[0-9a-f]{40}$",
+                        f"{mid} hf_revision must be a pinned 40-char SHA",
+                    )
+                    self.assertIn(
+                        m.get("recommended_device"), {"NPU", "GPU", "CPU"},
+                        f"{mid} recommended_device must be NPU/GPU/CPU",
+                    )
+                    # ov_repo entries must validate and not pretend to be Ollama.
+                    self.assertTrue(catalog._validate_model(m))
+                    self.assertFalse(m.get("ollama_tag"))
+        self.assertGreaterEqual(seen_ov, 8, "expected >= 4 OpenVINO entries in each of the two sources")
+
     def test_sdxl_lightning_uses_full_comfyui_checkpoint(self):
         root = self._repo_root()
         active = {m["id"]: m for m in catalog.load_catalog(root / "models_catalog.json")}

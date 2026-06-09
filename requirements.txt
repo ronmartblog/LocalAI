@@ -12,9 +12,9 @@ psutil>=5.9.0
 # transformers>=4.40.0            # Tokenizers & streaming
 # huggingface-hub>=0.34.0,<1.0    # Model downloads from HuggingFace (transformers 4.x requires <1.0)
 
-# Optional — OpenVINO GenAI support (Windows Intel NPU/GPU/CPU)
-# openvino>=2025.0.0
-# openvino-genai>=2025.0.0
+# Required for NPU acceleration on Intel Core Ultra (auto-installed by main.py on Windows)
+openvino>=2025.0.0
+openvino-genai>=2025.0.0
 
 # Optional — utility model demos (OCR, speech, embeddings, document AI)
 # transformers>=4.57.0

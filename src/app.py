@@ -247,7 +247,7 @@ except ImportError:
     PIL_AVAILABLE = False
 
 APP_TITLE = "LocalAI Studio"
-APP_VERSION = "2026.06.08.0"
+APP_VERSION = "2026.06.09.3"
 
 CHAT_RESPONSE_TOKEN_MAX = 131072
 CHAT_RESPONSE_TOKEN_ONNX_FALLBACK = 4096
@@ -304,7 +304,9 @@ def _bench_quick_fallback_model_ids(*, has_gpu: bool) -> set[str]:
     """Return the Quick-mode default-tick model ids for the synthetic
     ``"This Device"`` profile (no ``skus.json`` loaded, or the user
     manually selected ``"This Device"`` from a populated SKU dropdown).
-    Always includes the catalog's ``Ultra Small`` chat models; adds the
+    Always includes the catalog's ``Ultra Small`` chat models (excluding
+    ``backend=openvino`` NPU models, which require an Intel NPU + the OpenVINO
+    runtime and are not part of the default Quick benchmark); adds the
     single ``quick_image_smallest`` image-gen model when ``has_gpu`` is
     True. Image-gen rows are gated by the same ``has_gpu`` rule that
     ``_bench_default_selected_for_model`` enforces earlier in the
@@ -314,6 +316,7 @@ def _bench_quick_fallback_model_ids(*, has_gpu: bool) -> set[str]:
         str(m.get("id"))
         for m in catalog.MODELS
         if m.get("category") == "Ultra Small"
+        and m.get("backend") != "openvino"
     }
     if has_gpu:
         ids.add(_BENCH_QUICK_FALLBACK_IMAGE_GEN_ID)
@@ -6635,12 +6638,14 @@ class App(ctk.CTk):
         ctk.CTkLabel(toolbar, text="Backend:", font=ctk.CTkFont(size=12)).grid(row=0, column=3, padx=(0, 4))
         backend_menu = ctk.CTkOptionMenu(
             toolbar,
-            values=["GPU/CPU (Ollama)", "CPU only (Ollama)", "OpenVINO (GPU/NPU)", "NPU/OpenVINO (ONNX)"],
+            values=["GPU/CPU (Ollama)", "CPU only (Ollama)", "NPU (OpenVINO)", "iGPU (OpenVINO)", "ONNX (DirectML)"],
             variable=self._backend_var,
             width=190,
             **self._option_menu_style(),
         )
         backend_menu.grid(row=0, column=4, sticky="w")
+        self._backend_menu = backend_menu
+        self._maybe_default_backend_to_npu()
 
         ctk.CTkButton(
             toolbar, text="Free VRAM", width=90,
@@ -7022,6 +7027,40 @@ class App(ctk.CTk):
         ctk.CTkLabel(self._sys_frame, text=onnx_txt, font=ctk.CTkFont(size=11),
                      anchor="w", text_color=onnx_color, wraplength=600
                      ).grid(row=self._gpu_start_row + 12, column=0, columnspan=2, sticky="w", padx=8, pady=2)
+
+        # ── Local Accelerators (CPU / iGPU / NPU via OpenVINO) ──────────────
+        ctk.CTkLabel(
+            self._sys_frame, text="Local Accelerators",
+            font=ctk.CTkFont(size=13, weight="bold"), anchor="w",
+        ).grid(row=self._gpu_start_row + 13, column=0, columnspan=2, sticky="w", padx=8, pady=(16, 2))
+
+        accel_lines = []
+        if OV_GENAI_AVAILABLE:
+            try:
+                from src import openvino_client as _ovc
+                for _dev in _ovc.available_ov_devices():
+                    accel_lines.append(f"  {_dev}: {_ovc.ov_device_full_name(_dev)}")
+            except Exception:
+                pass
+        accel_txt = "\n".join(accel_lines) if accel_lines else (
+            "OpenVINO not installed — install openvino + openvino-genai to use the Intel NPU/iGPU."
+        )
+        ctk.CTkLabel(
+            self._sys_frame, text=accel_txt, font=ctk.CTkFont(size=11),
+            anchor="w", justify="left", text_color=TEXT_MUTED, wraplength=600,
+        ).grid(row=self._gpu_start_row + 14, column=0, columnspan=2, sticky="w", padx=8, pady=2)
+
+        self._npu_test_btn = ctk.CTkButton(
+            self._sys_frame, text="Test NPU", width=110,
+            **self._outline_button_style(),
+            command=self._test_npu,
+        )
+        self._npu_test_btn.grid(row=self._gpu_start_row + 15, column=0, sticky="w", padx=8, pady=(6, 2))
+        self._npu_test_result = ctk.CTkLabel(
+            self._sys_frame, text="", font=ctk.CTkFont(size=11),
+            anchor="w", justify="left", text_color=TEXT_MUTED, wraplength=600,
+        )
+        self._npu_test_result.grid(row=self._gpu_start_row + 16, column=0, columnspan=2, sticky="w", padx=8, pady=2)
 
         self._update_system_page()
 
@@ -19866,8 +19905,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
             if not proceed:
                 return
 
-        if "OpenVINO (GPU/NPU)" in backend:
-            self._load_ov_model(model)
+        if "OpenVINO" in backend:
+            device_pref = "NPU" if "NPU" in backend else "GPU"
+            self._load_ov_model(model, device_pref)
         elif "ONNX" in backend:
             self._load_onnx_model(model)
         else:
@@ -19890,7 +19930,132 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
             self._apply_chat_demo_prompt(model)
             logger.info(f"Chat model set to: {model['ollama_tag']} (backend={backend})")
 
-    def _load_ov_model(self, model: dict):
+    def _test_npu(self):
+        """Diagnostic NPU probe. Downloads the smallest tagged-`npu` OpenVINO
+        model (in-process, I/O-bound) then runs the compile + a short generate
+        in a SEPARATE PROCESS with a hard timeout.
+
+        Subprocess isolation is essential: the OpenVINO NPU compile holds the
+        Python GIL (and can hang outright on some models), so running it
+        in-process — even on a worker thread — starves the Tk UI thread and the
+        window goes "Not Responding". A re-entry guard prevents a second click
+        from stacking concurrent NPU compiles (which can deadlock the driver)."""
+        def _set(text, color=TEXT_MUTED):
+            self.after(0, lambda: self._npu_test_result.configure(text=text, text_color=color))
+
+        if getattr(self, "_npu_test_running", False):
+            _set("NPU test is already running — please wait for it to finish.", WARN_TEXT)
+            return
+        if not OV_GENAI_AVAILABLE:
+            _set("OpenVINO is not installed. Run: pip install openvino openvino-genai", WARN_TEXT)
+            return
+        try:
+            from src import openvino_client as _ovc
+            devices = _ovc.available_ov_devices()
+        except Exception as exc:
+            _set(f"OpenVINO probe failed: {exc}", ERROR_TEXT)
+            return
+        if "NPU" not in devices:
+            _set("No NPU device reported by OpenVINO on this machine.", WARN_TEXT)
+            return
+
+        # Smallest tagged-npu model with an ov_repo (TinyLlama by design).
+        candidates = [
+            m for m in self._catalog_models
+            if "npu" in (m.get("tags") or []) and m.get("ov_repo")
+        ]
+        if not candidates:
+            _set("No NPU-ready model in the catalog to test.", WARN_TEXT)
+            return
+        model = min(candidates, key=lambda m: float(m.get("size_gb") or 0) or 1e9)
+
+        self._npu_test_running = True
+        try:
+            self._npu_test_btn.configure(state="disabled")
+        except Exception:
+            pass
+        _set(f"Testing NPU with {model['name']} … (first run downloads + compiles; can take a few minutes)", WARN_TEXT)
+
+        def _run():
+            try:
+                model_dir = config.models_dir(self.cfg) / "ov" / model["id"].replace(":", "_")
+                ov_cache_dir = config.models_dir(self.cfg) / "ov_cache" / model["id"].replace(":", "_")
+                need_dl = not model_dir.exists() or not any(
+                    f.suffix in (".xml", ".bin") for f in model_dir.iterdir()
+                )
+                if need_dl:
+                    if not HF_AVAILABLE:
+                        raise OVError('huggingface_hub not installed.')
+                    _set(f"Downloading {model['ov_repo']} …", WARN_TEXT)
+                    download_ov_model(model["ov_repo"], model_dir,
+                                      progress_cb=lambda m: _set(m, WARN_TEXT),
+                                      stop_event=self._stop_event)
+                _set("Compiling on NPU in an isolated process (first compile can take 30–60 s) …", WARN_TEXT)
+                repo_root = Path(__file__).parent.parent
+                run_kw = {"capture_output": True, "text": True, "timeout": 240, "cwd": str(repo_root)}
+                if sys.platform == "win32":
+                    run_kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+                proc = subprocess.run(
+                    [sys.executable, "-m", "src.openvino_client",
+                     str(model_dir), "NPU", str(ov_cache_dir), "16"],
+                    **run_kw,
+                )
+                import json as _json
+                data = None
+                for line in (proc.stdout or "").splitlines():
+                    s = line.strip()
+                    if s.startswith("{") and s.endswith("}"):
+                        try:
+                            data = _json.loads(s)
+                        except Exception:
+                            data = None
+                if data is None:
+                    detail = (proc.stderr or proc.stdout or "no output").strip()[-300:]
+                    raise OVError(f"probe returned no result (exit {proc.returncode}): {detail}")
+                if not data.get("ok"):
+                    raise OVError(data.get("error") or "unknown probe error")
+                dev = data.get("device", "NPU")
+                compile_s = float(data.get("compile_s") or 0)
+                ntok = int(data.get("ntok") or 0)
+                tps = float(data.get("tps") or 0)
+                cache_state = "warm/cache hit" if compile_s < 8.0 else "cold/cache miss"
+                _set(
+                    f"OK on {dev}: compile {compile_s:.1f}s ({cache_state}), "
+                    f"{ntok} tokens at {tps:.1f} tok/s. Run again for the warm number.",
+                    SUCCESS_TEXT,
+                )
+            except subprocess.TimeoutExpired:
+                _set(
+                    "NPU test timed out (>240 s) — the NPU compiler is likely hanging on this "
+                    "model. Try the iGPU (OpenVINO) backend instead. The app stayed responsive "
+                    "because the test ran in a separate process.",
+                    ERROR_TEXT,
+                )
+            except Exception as exc:
+                _set(f"NPU test failed: {exc}", ERROR_TEXT)
+            finally:
+                self._npu_test_running = False
+                self.after(0, lambda: self._npu_test_btn.configure(state="normal"))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _maybe_default_backend_to_npu(self):
+        """On chat-page build, default the backend to NPU (OpenVINO) when this
+        machine has an Intel NPU AND the selected model has a pre-built
+        OpenVINO repo. No-op otherwise so Ollama stays the default elsewhere."""
+        try:
+            if not OV_GENAI_AVAILABLE:
+                return
+            npu_devices = list(getattr(getattr(self, "gpu_info", None), "npu_devices", []) or [])
+            if not npu_devices:
+                return
+            model = self.active_model if isinstance(getattr(self, "active_model", None), dict) else None
+            if model and model.get("ov_repo"):
+                self._backend_var.set("NPU (OpenVINO)")
+        except Exception:
+            pass
+
+    def _load_ov_model(self, model: dict, device_pref: str = "NPU"):
         if not OV_GENAI_AVAILABLE:
             messagebox.showerror(
                 "OpenVINO GenAI not installed",
@@ -19908,8 +20073,11 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
             )
             return
 
-        preferred_device = pick_ov_device("GPU")
+        preferred_device = pick_ov_device(device_pref)
         model_dir = config.models_dir(self.cfg) / "ov" / model["id"].replace(":", "_")
+        # CACHE_DIR for the (expensive) first NPU/GPU compile — keyed per model
+        # so a cache hit survives restarts (cold ~30-60 s → warm ~2-3 s).
+        ov_cache_dir = config.models_dir(self.cfg) / "ov_cache" / model["id"].replace(":", "_")
 
         self._switch_page("chat")
         self._append_chat("system", f"Loading OpenVINO model {model['name']} …\n")
@@ -19936,7 +20104,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {"ChromaLatentToImage": "Chroma: Latent To Image"}
                 self.after(0, lambda: self._append_chat(
                     "system", f"Compiling model for {preferred_device} …\n"
                 ))
-                session = OVModelSession(model_dir, preferred_device)
+                session = OVModelSession(model_dir, preferred_device, cache_dir=ov_cache_dir)
                 actual_device = session._device
                 provider_label = f"OpenVINO/{actual_device}"
                 if actual_device != preferred_device:

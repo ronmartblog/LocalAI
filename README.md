@@ -56,6 +56,7 @@ A quick tour of what LocalAI Studio looks like in use.
 | ![Docs home](docs/screenshots/08-docs-home.png) | **Docs** — built-in offline docs covering setup, models, image gen, and architecture. |
 | ![Model Guide](docs/screenshots/09-docs-model-guide.png) | **Model Guide** — per-model demo gallery, prompts, and notes. |
 | ![Image Gen Guide](docs/screenshots/10-docs-image-gen-guide.png) | **Image Gen Guide** — tips for prompts, refinements, and getting the most out of each base model. |
+| ![NPU acceleration](docs/screenshots/11-npu-openvino.png) | **NPU acceleration** — Intel® AI Boost NPU detected via OpenVINO; INT4 chat models run on the NPU (with automatic NPU→iGPU fallback for larger models). |
 
 ## Quick start
 

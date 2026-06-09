@@ -297,6 +297,11 @@ echo.
 if "!SETUP_ALL_FEATURES!"=="1" (
     set INSTALL_OPENVINO=y
     echo [*] Setup all features: installing OpenVINO GenAI support.
+) else if "!SETUP_HAS_NPU!"=="1" (
+    echo [*] Intel NPU detected ^(!SETUP_NPU_NAMES!^) — OpenVINO GenAI enables NPU acceleration.
+    set "INSTALL_OPENVINO="
+    set /p INSTALL_OPENVINO="Install OpenVINO GenAI support (recommended for your NPU)? [Y/n]: "
+    if not defined INSTALL_OPENVINO set INSTALL_OPENVINO=y
 ) else (
     set /p INSTALL_OPENVINO="Install OpenVINO GenAI support? [y/N]: "
 )
@@ -614,6 +619,14 @@ for /f "usebackq delims=" %%G in (`powershell -NoProfile -Command "$g=Get-CimIns
 if defined SETUP_NVIDIA_GPU_NAMES set SETUP_HAS_NVIDIA=1
 for /f "usebackq delims=" %%G in (`powershell -NoProfile -Command "$g=Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -and $_.Name -notmatch 'Microsoft|Basic|Remote|Hyper-V|NVIDIA|GeForce|RTX|Quadro' -and $_.Name -match 'AMD|Radeon|Intel|Arc|Iris|UHD|Xe' }; if ($g) { ($g | ForEach-Object { $_.Name }) -join ', ' }" 2^>nul`) do set "SETUP_DML_GPU_NAMES=%%G"
 if defined SETUP_DML_GPU_NAMES set SETUP_HAS_DML_GPU=1
+:: NPU detection (Intel AI Boost — Meteor/Lunar/Arrow/Panther Lake). Used to
+:: default the OpenVINO GenAI prompt to Yes on AI PCs, mirroring how DirectML
+:: auto-installs when an iGPU is present. PCI device IDs: 7D1D (Meteor Lake),
+:: 643E (Lunar Lake), AD1D (Arrow Lake), B03E (Panther Lake).
+set SETUP_HAS_NPU=0
+set SETUP_NPU_NAMES=
+for /f "usebackq delims=" %%G in (`powershell -NoProfile -Command "$n=Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object { ($_.FriendlyName -match 'AI Boost|Neural Processor|\bNPU\b') -or ($_.InstanceId -match 'VEN_8086&DEV_(B03E|643E|7D1D|AD1D)') }; if ($n) { (($n | ForEach-Object { $_.FriendlyName }) | Select-Object -Unique) -join ', ' }" 2^>nul`) do set "SETUP_NPU_NAMES=%%G"
+if defined SETUP_NPU_NAMES set SETUP_HAS_NPU=1
 :: v2026.06.01.7 (Ron, 2026-06-01): pick exactly ONE onnxruntime variant
 :: based on detected GPU vendor. onnxruntime / onnxruntime-gpu /
 :: onnxruntime-directml all install into the same onnxruntime/ namespace

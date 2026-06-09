@@ -28,6 +28,8 @@ else:
     OPTIONAL_PACKAGES = {
         "onnxruntime_directml": "onnxruntime-directml",
         "onnxruntime_genai": "onnxruntime-genai-directml",
+        "openvino": "openvino",
+        "openvino_genai": "openvino-genai",
         "optimum": "optimum[onnxruntime]",
         "transformers": "transformers",
         "huggingface_hub": "huggingface-hub>=0.34.0,<1.0",
@@ -97,7 +99,7 @@ def main():
         print("  pip install torch sentence-transformers soundfile scipy pillow timm sentencepiece librosa backoff hf_xet")
     else:
         print("Optional NPU/DirectML packages can be installed via Settings or:")
-        print('  pip install onnxruntime-directml onnxruntime-genai-directml "optimum[onnxruntime]" transformers "huggingface-hub>=0.34.0,<1.0"')
+        print('  pip install onnxruntime-directml onnxruntime-genai-directml openvino openvino-genai "optimum[onnxruntime]" transformers "huggingface-hub>=0.34.0,<1.0"')
         print("Utility demos (OCR/speech/embeddings/document AI) also use:")
         print("  pip install torch torchvision sentence-transformers soundfile scipy pillow timm sentencepiece librosa backoff accelerate safetensors einops hf_xet")
 

@@ -27,6 +27,21 @@ SKIP_WHEN_PUBLIC = unittest.skipUnless(
 
 
 class SetupReleaseContractTests(unittest.TestCase):
+    def test_setup_detects_npu_and_defaults_openvino_yes(self):
+        """setup1.bat must detect an Intel NPU (SETUP_HAS_NPU) and default the
+        OpenVINO GenAI prompt to Yes when one is present — mirroring how
+        DirectML auto-installs when an iGPU is detected."""
+        setup = read("setup1.bat")
+        self.assertIn("SETUP_HAS_NPU", setup)
+        # Detection probes Intel NPU PCI IDs and/or the AI Boost friendly name.
+        self.assertIn("B03E", setup, "Panther Lake NPU PCI id missing")
+        self.assertIn("AI Boost", setup)
+        # The OpenVINO install branch must key off SETUP_HAS_NPU and default
+        # to y on that branch.
+        npu_branch = setup[setup.index('"!SETUP_HAS_NPU!"=="1"'):]
+        self.assertIn("INSTALL_OPENVINO", npu_branch)
+        self.assertIn("set INSTALL_OPENVINO=y", npu_branch)
+
     def test_python_path_variable_is_consistent_across_launchers(self):
         setup = read("setup1.bat")
         self.assertIn("LOCALAI_PYTHON", setup)
