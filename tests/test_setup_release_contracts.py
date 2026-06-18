@@ -1819,9 +1819,11 @@ class Phi4MiniSamplePromptContractTests(unittest.TestCase):
     These tests lock the curated rewrite so the failure cannot resurface:
     sample-2 MUST use the function name ``flag_out_of_range``, MUST cite
     the unambiguous "2 to 8 (degrees Celsius)" range, BOTH code samples
-    (1 and 2) MUST end with ``and no explanation``, AND sample-3 MUST
-    carry a hard word budget AND an explicit "do not write any
-    introduction, conclusion, or summary" anti-drift directive.
+    (1 and 2) MUST end with a terminating stop signal (``and stop``) and
+    MUST NOT use the empirically-failing ``exactly <N> assert tests``
+    self-test pattern (2026-06-17 verification on CPC-ronma-4GM0M), AND
+    sample-3 MUST carry a hard word budget AND an explicit "do not write
+    any introduction, conclusion, or summary" anti-drift directive.
     """
 
     def _phi4_mini_samples(self):
@@ -1877,25 +1879,50 @@ class Phi4MiniSamplePromptContractTests(unittest.TestCase):
             f"{sample_2!r}",
         )
 
-    def test_phi4_mini_code_prompts_end_with_no_explanation_stop_signal(self):
-        """Sample-1 and sample-2 are both code-generation prompts. BOTH
-        must end with 'and no explanation' (or 'no explanation.'). Without
-        that stop signal, phi4:mini writes a free-form explanation block
-        after the code and is prone to degenerate repetition loops. The
-        third sample is an advisory-bullets prompt and is subject to its
-        own (separate) anti-drift rule pinned by
-        ``test_phi4_mini_sample_3_has_hard_length_budget_and_anti_drift_signal``.
+    def test_phi4_mini_code_prompts_have_terminating_stop_signal(self):
+        """Sample-1 and sample-2 are both code-generation prompts. Each MUST
+        end with an explicit terminating stop signal AND must NOT use the
+        ``exactly <N> assert tests`` self-test pattern.
+
+        History: the 2026-05-31 curation added an ``and no explanation`` stop
+        signal to the code prompts. The 2026-06-17 extended-bench verification
+        on a CPU-only Cloud PC (CPC-ronma-4GM0M) showed that was INSUFFICIENT:
+        the code prompts that asked for ``exactly three assert tests and no
+        explanation`` still spiralled — phi4:mini wrote a function, then
+        second-guessed its own asserts (``Note: the above is incorrect,
+        version 2...``) and looped to the 4096-token ceiling. The verified fix
+        drops the self-test-critique trap and asks instead for a concrete,
+        naturally-terminating deliverable ("show example calls and the value
+        each returns, and stop"). That rewrite passed 3/3 on the same box.
+
+        This test pins the verified shape so the failure cannot resurface:
+
+          1. each code prompt ends with a terminating stop signal — ``and
+             stop`` (the verified terminator) or the legacy ``no explanation``;
+          2. neither code prompt uses the empirically-failing ``exactly <N>
+             assert tests`` self-test pattern.
         """
         samples = self._phi4_mini_samples()
+        stop_signal = re.compile(r"(and\s+stop|no\s+explanation)\b", re.IGNORECASE)
+        assert_trap = re.compile(r"exactly\s+\S+\s+assert\s+tests?\b", re.IGNORECASE)
         for idx in (0, 1):
             text = samples[idx]
             self.assertRegex(
-                text.lower(),
-                re.compile(r"no\s+explanation\b"),
-                f"phi4:mini sample-{idx+1} must end with a 'no explanation' "
-                f"stop signal. Code prompts without it cause phi4:mini to "
-                f"drift into explanation mode and risk the v5.5.x "
+                text,
+                stop_signal,
+                f"phi4:mini sample-{idx+1} must end with a terminating stop "
+                f"signal ('and stop' or 'no explanation'). Code prompts "
+                f"without it let the model drift past the answer and risk the "
                 f"degenerate-loop failure. Sample text: {text!r}",
+            )
+            self.assertNotRegex(
+                text,
+                assert_trap,
+                f"phi4:mini sample-{idx+1} reverted to the 'exactly N assert "
+                f"tests' self-test pattern that empirically triggered the "
+                f"2026-06-17 degenerate loop on CPC-ronma-4GM0M. Ask for "
+                f"'example calls and the value each returns, and stop' instead. "
+                f"Sample text: {text!r}",
             )
 
     def test_phi4_mini_sample_3_has_hard_length_budget_and_anti_drift_signal(self):

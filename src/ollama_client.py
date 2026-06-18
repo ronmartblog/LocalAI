@@ -21,6 +21,49 @@ class OllamaError(Exception):
     pass
 
 
+def _ollama_error_detail(exc: Exception) -> str:
+    """Return Ollama's server-side error body for a failed request, if any.
+
+    requests' ``raise_for_status()`` only produces a generic line such as
+    ``500 Server Error: Internal Server Error for url: ...`` -- the actual
+    cause (e.g. ``model requires more system memory than is available``, a
+    runner crash, or an unsupported architecture) is in the JSON response
+    body, which is otherwise discarded. Surfacing it makes benchmark
+    failure logs self-diagnosing instead of an opaque 500.
+
+    Returns a leading-separator string ready to append to an error message.
+    When the server replied at all, the suffix always includes the HTTP
+    status so a benchmark log unambiguously shows the patched path ran
+    (even on an empty-body hard runner crash). Returns ``""`` only when
+    there was no HTTP response object (e.g. a connection error, already
+    described by the base exception). Never raises.
+    """
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return ""
+    status = getattr(resp, "status_code", None)
+    reason = (getattr(resp, "reason", "") or "").strip()
+    try:
+        body = (resp.text or "").strip()
+    except Exception:
+        body = ""
+    if body:
+        try:
+            parsed = json.loads(body)
+            if isinstance(parsed, dict) and parsed.get("error"):
+                body = str(parsed["error"]).strip()
+        except (json.JSONDecodeError, ValueError):
+            pass
+    if body and len(body) > 600:
+        body = body[:600] + "...(truncated)"
+    if body:
+        return f" -- server said (HTTP {status}): {body}"
+    return (
+        f" -- server returned HTTP {status} {reason}".rstrip()
+        + " with an empty body (likely a hard runner crash on this model)"
+    )
+
+
 def _normalize_ollama_tag_for_match(tag: object) -> str:
     """Normalize Ollama tags so bare names and ``:latest`` variants match."""
     raw = str(tag or "").strip().lower()
@@ -367,7 +410,7 @@ class OllamaClient:
                     if data.get("done"):
                         break
         except requests.RequestException as e:
-            raise OllamaError(f"Chat failed: {e}") from e
+            raise OllamaError(f"Chat failed: {e}{_ollama_error_detail(e)}") from e
 
     def chat_stream_with_stats(
         self,
@@ -454,7 +497,7 @@ class OllamaClient:
                         if visible_token:
                             yield visible_token, None
         except requests.RequestException as e:
-            raise OllamaError(f"Chat failed: {e}") from e
+            raise OllamaError(f"Chat failed: {e}{_ollama_error_detail(e)}") from e
 
     def unload_model(self, tag: str) -> bool:
         """

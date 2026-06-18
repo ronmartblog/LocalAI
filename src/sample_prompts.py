@@ -140,12 +140,12 @@ MODEL_DEMO_SAMPLE_OVERRIDES: dict[str, list[str]] = {'all-minilm': ['Use the que
           'relationship, an analogy, and a practical mitigation.',
           'A data-science lead must choose between accuracy and memory savings for an edge model. Give a three-part '
           'recommendation: when to quantize, what to test, when not to.'],
- 'phi4:mini': ['Write one compact Python function `fits_job(ram_gb, vram_gb, needed_ram_gb, needed_vram_gb)` for a '
-               'portable video-inspection device. It returns True only when both memory limits fit. Include exactly '
-               'three assert tests and no explanation.',
+ 'phi4:mini': ['Write one compact Python function `fits_job(ram_gb, vram_gb, needed_ram_gb, needed_vram_gb)` that '
+               'returns True only when both the RAM and VRAM you have are at least what is needed. Then show two '
+               'example calls and the value each one returns, and stop.',
                'Write a compact Python function `flag_out_of_range(readings)` that returns the list of '
-               'indexes whose values fall outside the inclusive range 2 to 8 (degrees Celsius). Include '
-               'exactly three assert tests and no explanation.',
+               'indexes whose values fall outside the inclusive range 2 to 8 (degrees Celsius). Then show one '
+               'example call on a five-item list and the list it returns, and stop.',
                'In exactly three bullets totaling under 60 words, recommend whether to optimize CPU code or buy '
                'more memory for a robotics homework project. Each bullet must be one sentence: (1) evidence-based '
                'observation, (2) tradeoff, (3) next experiment. Do not write any introduction, conclusion, or '
@@ -178,7 +178,7 @@ MODEL_DEMO_SAMPLE_OVERRIDES: dict[str, list[str]] = {'all-minilm': ['Use the que
                   'likely action in under 70 words.',
                   'Text-only diagram fixture: Customer -> Intake -> Reviewer -> Resolution. Explain the flow in '
                   'three short numbered steps.'],
- 'qwen2.5vl-32b': ['Text-only screenshot fixture: A dashboard card says "Orders: 81% fulfilled", "Late: 17", and '
+ 'granite3.2-vision': ['Text-only screenshot fixture: A dashboard card says "Orders: 81% fulfilled", "Late: 17", and '
                    '"Queue: 2 escalations". In exactly three bullets, summarize status, risk, and next action.',
                    'Text-only chart fixture: Q1 support tickets=42, Q2=35, Q3=29, Q4=31. State the trend and one '
                    'likely action in under 70 words.',

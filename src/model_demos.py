@@ -326,7 +326,6 @@ _CHAT_OVERRIDES = {
     "qwen3-30b-a3b": ("MoE reasoning", "/no_think Explain why a mixture-of-experts model can feel larger than its active parameters. Include implications for speed, memory, and user experience."),
     "deepseek-r1:32b": ("Large reasoning", "Answer in exactly five concise bullets comparing three pilot ideas: automated triage, document summarization, and image-based inspection. Give one reason per recommendation."),
     "llama3.3": ("Large enterprise reasoning", "Draft a board-level summary explaining why an organization should run sensitive assistants close to its data, with benefits, risks, rollout phases, and success metrics."),
-    "llama3.2-vision:11b": ("Vision chat", "If I upload a product screenshot, analyze layout, key UI affordances, missing context, and what a user should try next."),
     "gemma3:4b-vision": ("Small vision chat", "Describe an uploaded screenshot for a non-technical user, then suggest three quick improvements to make it clearer."),
     "gemma3:12b-vision": ("Balanced vision reasoning", "Analyze an uploaded chart or dashboard image. Extract visible metrics, infer the trend, and list questions to ask before making a decision."),
     "gemma3-27b": ("Large multimodal reasoning", "Review an uploaded architecture diagram. Explain the system, identify risks, and suggest a simpler alternative."),
@@ -334,7 +333,7 @@ _CHAT_OVERRIDES = {
     "mistral-small3.2": ("Large vision/writing", "Analyze an uploaded product screenshot and write a polished release-note paragraph plus three user-facing benefits."),
     "qwen2.5vl-3b": ("Small vision-language", "Look at an uploaded image and return a concise caption, visible text, and one likely user intent."),
     "qwen2.5vl-7b": ("Balanced vision-language", "Analyze an uploaded UI screenshot and produce a QA checklist: layout issues, text issues, accessibility issues, and suggested fixes."),
-    "qwen2.5vl-32b": ("High-end vision reasoning", "Study an uploaded dense dashboard screenshot and produce a senior-analyst brief with insights, caveats, and recommended next actions."),
+    "granite3.2-vision": ("Document & chart vision", "Study an uploaded dashboard or report screenshot and produce a senior-analyst brief: key metrics, the trend, caveats, and recommended next actions."),
 }
 
 
