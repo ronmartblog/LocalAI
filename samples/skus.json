@@ -38,7 +38,6 @@
         "granite3.3:8b",
         "llama3.2:1b",
         "llama3.2:3b",
-        "llama3.2-vision:11b",
         "mistral-nemo",
         "nemotron-3-nano:4b",
         "nemotron-3-nano:4b-q8_0",
@@ -63,7 +62,6 @@
         "granite3.3:8b",
         "llama3.2:1b",
         "llama3.2:3b",
-        "llama3.2-vision:11b",
         "llama3.3",
         "mistral-nemo",
         "mistral-small3.2",
@@ -73,7 +71,6 @@
         "phi4:mini",
         "qwen2.5:0.5b",
         "qwen2.5-coder-7b",
-        "qwen2.5vl-32b",
         "qwen2.5vl-3b",
         "qwen2.5vl-7b",
         "qwen3-30b-a3b"
@@ -116,8 +113,8 @@
         "gemma3:1b",
         "gemma3:4b-vision",
         "granite3.1-moe:latest",
+        "granite3.2-vision",
         "granite3.3:8b",
-        "llama3.2-vision:11b",
         "llama3.2:1b",
         "llama3.2:3b",
         "minicpm-v-vision",
@@ -167,9 +164,9 @@
       "recommended_models": [
         "deepseek-r1:32b",
         "gemma3-27b",
+        "granite3.2-vision",
         "llama3.3",
         "mistral-small3.2",
-        "qwen2.5vl-32b",
         "qwen3-30b-a3b"
       ]
     },
@@ -196,7 +193,10 @@
       "vram_gb": 4,
       "gpu_fraction": "1/6 GPU",
       "bench_quick_models": {
-        "inherit": ["quick_chat_ultra_small", "quick_image_smallest"]
+        "inherit": [
+          "quick_chat_ultra_small",
+          "quick_image_smallest"
+        ]
       },
       "bench_extended_models": {
         "inherit": "extended_chat_low",
@@ -216,8 +216,8 @@
         "gemma3:1b",
         "gemma3:4b-vision",
         "granite3.1-moe:latest",
+        "granite3.2-vision",
         "granite3.3:8b",
-        "llama3.2-vision:11b",
         "llama3.2:1b",
         "llama3.2:3b",
         "minicpm-v-vision",
@@ -250,7 +250,10 @@
       "vram_gb": 8,
       "gpu_fraction": "1/3 GPU",
       "bench_quick_models": {
-        "inherit": ["quick_chat_ultra_small", "quick_image_smallest"]
+        "inherit": [
+          "quick_chat_ultra_small",
+          "quick_image_smallest"
+        ]
       },
       "bench_extended_models": {
         "inherit": [
@@ -264,12 +267,12 @@
         "flux1-dev-q4",
         "flux1-schnell-q4",
         "gemma3-27b",
+        "granite3.2-vision",
         "gsdf-counterfeit-v3.0",
         "juggernaut-xl-v9",
         "llama3.3",
         "mistral-small3.2",
         "playgroundai-playground-v2.5-1024px-aesthetic",
-        "qwen2.5vl-32b",
         "sdxl-base",
         "z-image-turbo"
       ]
@@ -282,7 +285,10 @@
       "vram_gb": 12,
       "gpu_fraction": "1/2 GPU",
       "bench_quick_models": {
-        "inherit": ["quick_chat_ultra_small", "quick_image_smallest"]
+        "inherit": [
+          "quick_chat_ultra_small",
+          "quick_image_smallest"
+        ]
       },
       "bench_extended_models": {
         "inherit": [
@@ -305,7 +311,10 @@
       "vram_gb": 24,
       "gpu_fraction": "Full GPU",
       "bench_quick_models": {
-        "inherit": ["quick_chat_ultra_small", "quick_image_smallest"]
+        "inherit": [
+          "quick_chat_ultra_small",
+          "quick_image_smallest"
+        ]
       },
       "bench_extended_models": {
         "inherit": [
@@ -317,5 +326,6 @@
         ]
       },
       "recommended_models": []
-    }  ]
+    }
+  ]
 }
