@@ -65,11 +65,14 @@ class GpuDetectTests(unittest.TestCase):
     def test_detect_gpu_does_not_install_cuda_by_default(self):
         self._force_windows_nvidia()
         self._block_torch_directml()
-        self._with_fake_torch(types.SimpleNamespace(
-            __version__="2.9.0+cpu",
-            version=types.SimpleNamespace(cuda=None),
-            cuda=FakeCuda(False),
-        ))
+        # CUDA is probed out-of-process now; mock the OOP probes to report a
+        # CPU-only wheel (no in-process torch import on the detection path).
+        original_name = gpu_detect._cuda_device_name_oop
+        original_state = gpu_detect._torch_cuda_available_oop
+        gpu_detect._cuda_device_name_oop = lambda *a, **kw: (False, "")
+        gpu_detect._torch_cuda_available_oop = lambda *a, **kw: ("cpu_wheel", "PyTorch 2.9.0+cpu is CPU-only")
+        self.addCleanup(lambda: setattr(gpu_detect, "_cuda_device_name_oop", original_name))
+        self.addCleanup(lambda: setattr(gpu_detect, "_torch_cuda_available_oop", original_state))
         calls = []
         original_fix = gpu_detect._fix_pytorch_cuda
         gpu_detect._fix_pytorch_cuda = lambda: calls.append("fix") or True
@@ -83,11 +86,14 @@ class GpuDetectTests(unittest.TestCase):
     def test_detect_gpu_does_not_reinstall_when_cuda_wheel_cannot_initialize(self):
         self._force_windows_nvidia()
         self._block_torch_directml()
-        self._with_fake_torch(types.SimpleNamespace(
-            __version__="2.9.0+cu128",
-            version=types.SimpleNamespace(cuda="12.8"),
-            cuda=FakeCuda(False),
-        ))
+        # CUDA build present but the runtime can't initialize — probed
+        # out-of-process. Must NOT trigger an auto-reinstall even with auto_fix.
+        original_name = gpu_detect._cuda_device_name_oop
+        original_state = gpu_detect._torch_cuda_available_oop
+        gpu_detect._cuda_device_name_oop = lambda *a, **kw: (False, "")
+        gpu_detect._torch_cuda_available_oop = lambda *a, **kw: ("cuda_unavailable", "PyTorch 2.9.0+cu128 CUDA unavailable")
+        self.addCleanup(lambda: setattr(gpu_detect, "_cuda_device_name_oop", original_name))
+        self.addCleanup(lambda: setattr(gpu_detect, "_torch_cuda_available_oop", original_state))
         calls = []
         original_fix = gpu_detect._fix_pytorch_cuda
         gpu_detect._fix_pytorch_cuda = lambda: calls.append("fix") or True
@@ -154,11 +160,12 @@ class GpuDetectTests(unittest.TestCase):
                 "cached_at_epoch": time.time(),
             }), encoding="utf-8")
 
-            self._with_fake_torch(types.SimpleNamespace(
-                __version__="2.9.0+cpu",
-                version=types.SimpleNamespace(cuda=None),
-                cuda=FakeCuda(False),
-            ))
+            # Cache validation now runs out-of-process (so a cold `import torch`
+            # cannot freeze the UI). Patch the OOP probe to report a CPU-only
+            # wheel — the cuda cache entry must then NOT be reused.
+            original_oop = gpu_detect._torch_cuda_available_oop
+            gpu_detect._torch_cuda_available_oop = lambda *a, **kw: ("cpu_wheel", "PyTorch 2.9.0+cpu is CPU-only")
+            self.addCleanup(lambda: setattr(gpu_detect, "_torch_cuda_available_oop", original_oop))
             self._block_torch_directml()
             original_detect = gpu_detect.detect_gpu
             calls = []
@@ -169,6 +176,52 @@ class GpuDetectTests(unittest.TestCase):
 
         self.assertEqual(info.gpu_type, "cpu")
         self.assertEqual(calls, [False])
+
+    def test_cuda_gpu_cache_is_reused_when_oop_probe_confirms_cuda(self):
+        """A fresh CUDA cache entry is reused (no re-detect) when the
+        out-of-process probe confirms CUDA is available."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "gpu_cache.json"
+            cache_path.write_text(json.dumps({
+                "gpu_type": "cuda",
+                "device_name": "NVIDIA A10-8Q",
+                "cached_at_epoch": time.time(),
+            }), encoding="utf-8")
+
+            original_oop = gpu_detect._torch_cuda_available_oop
+            gpu_detect._torch_cuda_available_oop = lambda *a, **kw: ("available", "PyTorch 2.9.0+cu128 (CUDA available)")
+            self.addCleanup(lambda: setattr(gpu_detect, "_torch_cuda_available_oop", original_oop))
+            original_detect = gpu_detect.detect_gpu
+            calls = []
+            gpu_detect.detect_gpu = lambda auto_fix=False: calls.append(auto_fix) or gpu_detect.GPUInfo("cpu", "CPU")
+            self.addCleanup(lambda: setattr(gpu_detect, "detect_gpu", original_detect))
+
+            info = gpu_detect.detect_gpu_cached(cache_path=cache_path)
+
+        self.assertEqual(info.gpu_type, "cuda")
+        self.assertEqual(info.device_name, "NVIDIA A10-8Q")
+        self.assertEqual(calls, [])  # cache hit — detect_gpu must NOT be called
+
+    def test_oop_torch_probe_uses_subprocess_not_in_process_import(self):
+        """The OOP CUDA validator must shell out (own GIL) rather than
+        `import torch` in-process — that import is what froze the UI."""
+        captured = {}
+
+        def fake_run(cmd, *a, **kw):
+            captured["cmd"] = cmd
+            return types.SimpleNamespace(stdout="available|2.9.0+cu128|12.8", stderr="", returncode=0)
+
+        original_run = gpu_detect.subprocess.run
+        gpu_detect.subprocess.run = fake_run
+        self.addCleanup(lambda: setattr(gpu_detect.subprocess, "run", original_run))
+
+        state, _ = gpu_detect._torch_cuda_available_oop()
+
+        self.assertEqual(state, "available")
+        self.assertEqual(captured["cmd"][0], sys.executable)
+        self.assertIn("-c", captured["cmd"])
+        self.assertTrue(any("import torch" in part for part in captured["cmd"]))
+
 
 
 class SnapdragonArm64Tests(unittest.TestCase):
@@ -225,29 +278,18 @@ class SnapdragonArm64Tests(unittest.TestCase):
         gpu_detect._nvidia_gpu_present = lambda: None
         self.addCleanup(lambda: setattr(gpu_detect, "_nvidia_gpu_present", original_nvidia))
 
-        # The CUDA branch in detect_gpu() runs ``import torch;
-        # torch.cuda.is_available()`` first — on a dev box with real CUDA
-        # this would return "cuda" before the Snapdragon check ever fires.
-        # Install a fake torch module that reports no CUDA so we exercise
-        # the Snapdragon short-circuit specifically.
-        previous_torch = sys.modules.get("torch", None)
-        had_previous_torch = "torch" in sys.modules
-        sys.modules["torch"] = types.SimpleNamespace(
-            __version__="2.9.0+cpu",
-            version=types.SimpleNamespace(cuda=None),
-            cuda=FakeCuda(False),
-        )
+        # The CUDA branch in detect_gpu() probes torch CUDA OUT-OF-PROCESS
+        # first — on a dev box with real CUDA this would return "cuda" before
+        # the Snapdragon check ever fires. Mock the OOP probe to report no CUDA
+        # so we exercise the Snapdragon short-circuit specifically.
+        original_name = gpu_detect._cuda_device_name_oop
+        gpu_detect._cuda_device_name_oop = lambda *a, **kw: (False, "")
+        self.addCleanup(lambda: setattr(gpu_detect, "_cuda_device_name_oop", original_name))
 
         # Sentinel: torch_directml should NEVER be imported on Snapdragon —
         # leave it unmocked. If detect_gpu reached the import line, an
         # ImportError-on-real-systems would still be caught and we'd return
         # CPU but WITHOUT the "Snapdragon ARM64" device label.
-        def restore_torch():
-            if had_previous_torch:
-                sys.modules["torch"] = previous_torch
-            else:
-                sys.modules.pop("torch", None)
-        self.addCleanup(restore_torch)
 
         info = gpu_detect.detect_gpu()
         self.assertEqual(info.gpu_type, "cpu")

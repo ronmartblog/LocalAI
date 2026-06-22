@@ -5634,13 +5634,30 @@ class IncompleteSetupBannerContractTests(unittest.TestCase):
                       "Banner must check the cached NVIDIA+CPU-torch flag.")
 
     def test_apply_gpu_detection_sets_nvidia_cpu_torch_flag(self):
-        """The NVIDIA+CPU-torch signal must be set during GPU detection
-        so the banner doesn't re-probe nvidia-smi on every refresh."""
-        src = self._function_source("_apply_gpu_detection_result")
-        self.assertIn("_pytorch_cuda_missing_on_nvidia", src,
+        """The NVIDIA+CPU-torch signal must be set during GPU detection so the
+        banner doesn't re-probe nvidia-smi on every refresh — and the heavy
+        probes must run on the worker thread, never the UI thread."""
+        apply_src = self._function_source("_apply_gpu_detection_result")
+        worker_src = self._function_source("_start_gpu_detection_async")
+
+        # The UI-thread apply consumes the precomputed flag …
+        self.assertIn("_pytorch_cuda_missing_on_nvidia", apply_src,
                       "_apply_gpu_detection_result must set the cached flag.")
-        self.assertIn("_nvidia_gpu_present", src)
-        self.assertIn("_torch_cuda_state", src)
+        # … but must NOT import torch or run WMI on the UI thread (that froze
+        # the window for ~15-21 s — the startup-freeze bug).
+        self.assertNotIn("import torch", apply_src,
+                         "_apply_gpu_detection_result must not import torch on the UI thread.")
+        self.assertNotIn("get_gpu_info", apply_src,
+                         "_apply_gpu_detection_result must not run WMI on the UI thread.")
+        self.assertNotIn("_torch_cuda_state", apply_src,
+                         "Torch CUDA validation must not run on the UI thread.")
+
+        # The worker thread computes the flag using the OUT-OF-PROCESS probe.
+        self.assertIn("_nvidia_gpu_present", worker_src)
+        self.assertIn("_torch_cuda_available_oop", worker_src,
+                      "Worker must validate CUDA out-of-process to keep the GIL free.")
+        self.assertNotIn("_torch_cuda_state", worker_src,
+                         "Worker must use the out-of-process probe, not the in-process one.")
 
     def test_async_completion_hooks_refresh_banner(self):
         """Banner must be refreshed after each async startup check that

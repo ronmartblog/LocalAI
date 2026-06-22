@@ -137,6 +137,26 @@ class ThreadingContractTests(unittest.TestCase):
         self.assertIn("_render_uncatalogued_lists(body, state)", apply_source)
         self.assertNotIn("_collect_uncatalogued_lists()", render_source)
 
+    def test_system_page_metrics_gathered_off_ui_thread(self):
+        """The System page must NOT call system_info.get_system_summary
+        (nvidia-smi + WMI + OpenVINO probes — up to ~30 s on a loaded vGPU
+        host) on the UI thread. It gathers on a worker thread and applies the
+        result via _apply_system_page on the UI thread."""
+        update_source = self._function_source("_update_system_page")
+        apply_source = self._function_source("_apply_system_page")
+
+        # Dispatcher spawns a worker, calls get_system_summary there, and
+        # marshals the result back to the UI thread.
+        self.assertIn("threading.Thread", update_source)
+        self.assertIn("get_system_summary", update_source)
+        self.assertIn("self.after(", update_source)
+        self.assertIn("_apply_system_page", update_source)
+
+        # The UI-thread apply must NOT do the heavy gather itself.
+        self.assertNotIn("get_system_summary", apply_source,
+                         "_apply_system_page must not call get_system_summary "
+                         "on the UI thread — it receives the precomputed summary.")
+
     def test_toolbox_status_checks_use_short_lived_caches(self):
         entry_source = self._function_source("_toolbox_model_entry")
         titles_source = self._function_source("_runnable_toolbox_titles")

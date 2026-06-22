@@ -247,7 +247,7 @@ except ImportError:
     PIL_AVAILABLE = False
 
 APP_TITLE = "LocalAI Studio"
-APP_VERSION = "2026.06.17.0"
+APP_VERSION = "2026.06.21.0"
 
 CHAT_RESPONSE_TOKEN_MAX = 131072
 CHAT_RESPONSE_TOKEN_ONNX_FALLBACK = 4096
@@ -1197,44 +1197,75 @@ class App(ctk.CTk):
             except Exception as exc:
                 logger.warning(f"GPU detection failed; using CPU fallback: {exc}")
                 gpu_info = GPUInfo("cpu", "CPU")
-            self.after(0, lambda info=gpu_info, started=started: self._apply_gpu_detection_result(info, started))
+            # Compute the heavy, GIL-/IO-bound startup signals HERE on the worker
+            # thread so the UI thread never blocks on them (doing either on the
+            # UI thread froze the window for ~15-21 s — the startup-freeze bug):
+            #   * "NVIDIA present but torch is CPU-only" banner flag — validated
+            #     OUT-OF-PROCESS so a cold `import torch` can't hold the GIL.
+            #   * Windows integrated-GPU (unified memory / DXGI-TDR) flag via WMI.
+            cuda_missing = False
+            try:
+                from src import gpu_detect as _gd
+                # When detection already resolved CUDA, torch CUDA is known-good
+                # (detect_gpu_cached/_detect_gpu_impl validated it out-of-process)
+                # — so the banner flag is False without a SECOND torch subprocess.
+                # Only the non-CUDA-but-NVIDIA case needs the extra probe to tell
+                # a CPU-only/missing wheel (flag True) from a driver-level
+                # cuda_unavailable (flag False). Saves a redundant ~2-5 s torch
+                # subprocess on the common warm-CUDA startup.
+                if gpu_info.gpu_type == "cuda":
+                    cuda_missing = False
+                elif _gd._nvidia_gpu_present():
+                    torch_state, _ = _gd._torch_cuda_available_oop()
+                    cuda_missing = torch_state in ("cpu_wheel", "missing")
+            except Exception:
+                cuda_missing = False
+            # The Windows-iGPU (DXGI-TDR) flag only matters on integrated GPUs;
+            # a discrete CUDA card is never an iGPU, so skip the ~50-200 ms WMI
+            # enumeration entirely on NVIDIA hosts.
+            windows_igpu = False
+            if sys.platform == "win32" and gpu_info.gpu_type != "cuda":
+                try:
+                    igpu_gpus = system_info.get_gpu_info()
+                    if igpu_gpus:
+                        g0 = igpu_gpus[0]
+                        windows_igpu = (
+                            bool(g0.get("unified_memory"))
+                            and g0.get("vendor") != "Apple"
+                        )
+                except Exception:
+                    windows_igpu = False
+            self.after(
+                0,
+                lambda info=gpu_info, st=started, cm=cuda_missing, ig=windows_igpu:
+                    self._apply_gpu_detection_result(info, st, cm, ig),
+            )
 
         threading.Thread(target=_worker, name="GpuDetection", daemon=True).start()
 
-    def _apply_gpu_detection_result(self, gpu_info: GPUInfo, started: float) -> None:
+    def _apply_gpu_detection_result(
+        self,
+        gpu_info: GPUInfo,
+        started: float,
+        pytorch_cuda_missing_on_nvidia: bool = False,
+        windows_unified_igpu: bool = False,
+    ) -> None:
+        # UI-thread only. Every heavy probe (out-of-process torch CUDA
+        # validation + WMI GPU enumeration) is done by the
+        # _start_gpu_detection_async worker and passed in, so this method NEVER
+        # imports torch or touches WMI on the UI thread. Importing torch here
+        # (a cold C-extension init that holds the GIL) froze the window for
+        # ~15-21 s on contended virtualized hosts — the startup-freeze bug.
         self.gpu_info = gpu_info
         self._gpu_detection_pending = False
         self._comfyui_force_cpu = gpu_info.gpu_type == "cpu"
-        # v2026.06.01.10: cache the "NVIDIA card present but torch is CPU-only"
-        # signal here (cheap probe — gpu_detect already loaded everything it
-        # needs during detect_gpu_cached). The setup-warning banner reads
-        # this flag without re-running GPU detection on every refresh.
-        try:
-            from src import gpu_detect as _gd
-            nvidia_name = _gd._nvidia_gpu_present()
-            if nvidia_name:
-                torch_state, _ = _gd._torch_cuda_state()
-                self._pytorch_cuda_missing_on_nvidia = (
-                    torch_state in ("cpu_wheel", "missing")
-                )
-            else:
-                self._pytorch_cuda_missing_on_nvidia = False
-        except Exception:
-            self._pytorch_cuda_missing_on_nvidia = False
-        # v5.5.12: Detect Windows-integrated GPU (subject to DXGI TDR).
-        # Cached here once because system_info.get_gpu_info() touches WMI and
-        # _populate_image_model_menu can fire repeatedly on ComfyUI restarts.
-        if sys.platform == "win32":
-            try:
-                igpu_gpus = system_info.get_gpu_info()
-                if igpu_gpus:
-                    g0 = igpu_gpus[0]
-                    self._windows_unified_igpu = (
-                        bool(g0.get("unified_memory"))
-                        and g0.get("vendor") != "Apple"
-                    )
-            except Exception:
-                self._windows_unified_igpu = False
+        # v2026.06.01.10: cached "NVIDIA card present but torch is CPU-only"
+        # signal (computed off the UI thread). The setup-warning banner reads
+        # _pytorch_cuda_missing_on_nvidia without re-running GPU detection.
+        self._pytorch_cuda_missing_on_nvidia = bool(pytorch_cuda_missing_on_nvidia)
+        # v5.5.12: Windows-integrated GPU (subject to DXGI TDR) flag, also
+        # computed off the UI thread (WMI is slow).
+        self._windows_unified_igpu = bool(windows_unified_igpu)
         try:
             if hasattr(self, "_img_cpu_mode_var"):
                 self._img_cpu_mode_var.set(self._comfyui_force_cpu)
@@ -1262,6 +1293,7 @@ class App(ctk.CTk):
         # is CPU-only on an NVIDIA box" condition — refresh the in-app
         # incomplete-setup banner so the warning appears (or clears).
         self._refresh_setup_warning_banner()
+
 
     def _load_startup_data_async(self):
         """Load user-editable SKU/catalog files after the first window is visible."""
@@ -4695,6 +4727,10 @@ class App(ctk.CTk):
         self._catalog_models = catalog.load_catalog()
         self._toolbox_model_by_id_cache = None
         self._runnable_toolbox_titles_cache = None
+        # The fit-tier cache is keyed by model id; a reloaded catalog can change
+        # a same-id model's min_vram_gb, so clear it or the Models list shows a
+        # stale fits/tight/exceeds badge until restart.
+        self._model_row_fit_cache = {}
         self._refresh_chat_model_selector()
         self._schedule_model_card_population()
         self._validate_image_recommended_settings()
@@ -4891,14 +4927,24 @@ class App(ctk.CTk):
             except Exception as e:
                 logger.warning(f"ComfyUI: orphan scan failed: {e}")
         else:
-            # Windows: use PowerShell + taskkill
+            # Windows: enumerate processes via CIM. The previous query used
+            # `-Filter "CommandLine LIKE '%ComfyUI%main.py%'"`, which forces WMI
+            # to resolve the CommandLine of EVERY process on the box — measured
+            # at ~16 s on a busy many-core virtualized host and a real
+            # startup-latency offender. ComfyUI always runs under
+            # python.exe/pythonw.exe, so we
+            # filter server-side on the cheap indexed `Name` property (instant)
+            # and match CommandLine client-side over just the handful of Python
+            # processes. Same result, a fraction of the cost.
             import subprocess as _sp
             try:
                 result = _sp.run(
                     ["powershell", "-NoProfile", "-Command",
-                     "Get-CimInstance Win32_Process -Filter \"CommandLine LIKE '%ComfyUI%main.py%'\" "
+                     "Get-CimInstance Win32_Process "
+                     "-Filter \"Name='python.exe' OR Name='pythonw.exe'\" "
+                     "| Where-Object { $_.CommandLine -like '*ComfyUI*main.py*' } "
                      "| Select-Object -ExpandProperty ProcessId"],
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True, text=True, timeout=15,
                 )
                 for line in result.stdout.splitlines():
                     line = line.strip()
@@ -6988,7 +7034,7 @@ class App(ctk.CTk):
             bar = ctk.CTkProgressBar(self._sys_frame)
             bar.set(0)
             bar.grid(row=i * 3 + 1, column=0, columnspan=2, sticky="ew", padx=8, pady=2)
-            lbl = ctk.CTkLabel(self._sys_frame, text="", font=ctk.CTkFont(size=11), anchor="w", text_color=TEXT_MUTED)
+            lbl = ctk.CTkLabel(self._sys_frame, text="measuring …", font=ctk.CTkFont(size=11), anchor="w", text_color=TEXT_MUTED)
             lbl.grid(row=i * 3 + 2, column=0, columnspan=2, sticky="w", padx=8)
             self._sys_widgets[key] = (bar, lbl)
 
@@ -7065,9 +7111,41 @@ class App(ctk.CTk):
         self._update_system_page()
 
     def _update_system_page(self):
+        """Refresh System-page metrics WITHOUT blocking the UI thread.
+
+        ``get_system_summary`` shells out to nvidia-smi + WMI
+        Win32_VideoController (+ OpenVINO/NPU probes). On a *loaded* vGPU host
+        those calls routinely take 10-30 s, and running them synchronously here
+        froze the whole app every time the user opened the System tab — and
+        again every 5 s from the resource monitor (which is exactly when users
+        check System: while the box is busy). Gather on a worker thread, then
+        apply the result to widgets on the UI thread via ``_apply_system_page``.
+        """
+        if not getattr(self, "_sys_widgets", None):
+            return  # page not built yet (or torn down by a theme rebuild)
+        gen = getattr(self, "_system_page_refresh_gen", 0) + 1
+        self._system_page_refresh_gen = gen
         try:
-            summary = system_info.get_system_summary(config.models_dir(self.cfg))
+            models_path = config.models_dir(self.cfg)
         except Exception:
+            return
+
+        def _worker():
+            try:
+                summary = system_info.get_system_summary(models_path)
+            except Exception:
+                return
+            self.after(0, lambda s=summary, g=gen: self._apply_system_page(s, g))
+
+        threading.Thread(target=_worker, name="SystemPageRefresh", daemon=True).start()
+
+    def _apply_system_page(self, summary: dict, gen: "int | None" = None) -> None:
+        """Apply a system summary (gathered off the UI thread) to the
+        System-page widgets. UI-thread only. Skips a stale result superseded by
+        a newer refresh, and no-ops if the page widgets are gone."""
+        if gen is not None and gen != getattr(self, "_system_page_refresh_gen", 0):
+            return
+        if not getattr(self, "_sys_widgets", None):
             return
 
         # CPU
@@ -11380,6 +11458,19 @@ class App(ctk.CTk):
         except Exception:
             pass
         self._refresh_setup_warning_banner()
+        # v2026.06.19 (Ron): on a warm host Ollama answers almost instantly, so
+        # this mark can fire before the banner widget exists or while a theme
+        # rebuild has momentarily set _setup_warning_banner=None — in which case
+        # the refresh above early-returns and the build-time refresh
+        # (_build_ui) leaves the banner stuck visible even though ollama_ok is
+        # now True. Re-confirm once the UI has settled. ollama_ok is already
+        # True so this can only ever hide a stale banner, never show a false
+        # one. This is the self-heal for the "Ollama isn't running" banner that
+        # lingered on the master box while Ollama was demonstrably up.
+        try:
+            self.after(1500, self._refresh_setup_warning_banner)
+        except Exception:
+            pass
 
     def _start_ollama_watchdog(self) -> None:
         """Re-probe Ollama in the background until it answers, then self-heal.

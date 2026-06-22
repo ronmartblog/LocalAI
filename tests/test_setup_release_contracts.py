@@ -1642,31 +1642,50 @@ class IgpuImageGenSafetyContractTests(unittest.TestCase):
     """
 
     def test_windows_unified_igpu_flag_cached_at_gpu_detection(self):
-        """``_apply_gpu_detection_result`` must set ``self._windows_unified_igpu``
-        based on ``system_info.get_gpu_info()`` so subsequent ImageGen lookups
-        don't re-query WMI. The cache must distinguish Windows iGPUs from
-        Apple Silicon unified-memory GPUs (no TDR on Metal).
+        """GPU detection must cache ``self._windows_unified_igpu`` based on
+        ``system_info.get_gpu_info()`` so subsequent ImageGen lookups don't
+        re-query WMI. The WMI query runs on the detection WORKER thread (never
+        the UI thread — that froze the window), and ``_apply_gpu_detection_result``
+        consumes the precomputed flag. The cache must distinguish Windows iGPUs
+        from Apple Silicon unified-memory GPUs (no TDR on Metal).
         """
         app_src = read("src/app.py")
-        start = app_src.find("def _apply_gpu_detection_result")
-        self.assertGreater(start, 0)
-        end = app_src.find("\n    def ", start + 1)
-        body = app_src[start:end]
+
+        # The UI-thread apply must SET the flag (from the value passed in) …
+        a_start = app_src.find("def _apply_gpu_detection_result")
+        self.assertGreater(a_start, 0)
+        a_end = app_src.find("\n    def ", a_start + 1)
+        apply_body = app_src[a_start:a_end]
         self.assertIn(
-            "_windows_unified_igpu",
-            body,
+            "self._windows_unified_igpu",
+            apply_body,
             "_apply_gpu_detection_result must set self._windows_unified_igpu so "
             "subsequent Image Gen calls don't re-query WMI.",
         )
+        self.assertNotIn(
+            "get_gpu_info", apply_body,
+            "WMI must NOT run on the UI thread — it belongs on the detection worker.",
+        )
+
+        # … and the detection WORKER must do the win32-gated WMI enumeration,
+        # excluding Apple-vendor unified memory.
+        w_start = app_src.find("def _start_gpu_detection_async")
+        self.assertGreater(w_start, 0)
+        w_end = app_src.find("\n    def ", w_start + 1)
+        worker_body = app_src[w_start:w_end]
+        self.assertIn(
+            "system_info.get_gpu_info()", worker_body,
+            "The detection worker must enumerate GPUs via WMI to cache the iGPU flag.",
+        )
         self.assertIn(
             'sys.platform == "win32"',
-            body,
-            "_apply_gpu_detection_result must gate the iGPU detection on "
+            worker_body,
+            "The detection worker must gate the iGPU detection on "
             "sys.platform == 'win32' so macOS unified-memory hosts (Apple "
             "Silicon, no TDR) don't get falsely flagged.",
         )
         self.assertRegex(
-            body,
+            worker_body,
             re.compile(r'vendor.*Apple', re.DOTALL),
             "Windows-iGPU detection must exclude Apple vendor — Apple Silicon "
             "is unified_memory but has no TDR (Metal has no per-kernel timeout).",

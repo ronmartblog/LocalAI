@@ -362,6 +362,101 @@ def _torch_cuda_state() -> tuple[str, str]:
     return "cpu_wheel", f"PyTorch {version} is CPU-only"
 
 
+def _torch_cuda_available_oop(timeout: float = 120.0) -> tuple[str, str]:
+    """Validate PyTorch CUDA in a SUBPROCESS so the caller's GIL is never held.
+
+    Returns the same ``(state, detail)`` contract as :func:`_torch_cuda_state`
+    (``available`` / ``cuda_unavailable`` / ``cpu_wheel`` / ``missing`` /
+    ``error``).
+
+    Why out-of-process: a cold ``import torch`` is heavy C-extension init that
+    holds the GIL for many seconds (on contended virtualized hosts we measured
+    ~15-21 s). Doing it on a background *thread* does NOT help — the GIL is
+    still held, so the Tk UI thread cannot paint or process input and the
+    window appears frozen. A child process has its own GIL, so the parent's UI
+    stays fully responsive while CUDA is validated. Used on the startup
+    cache-validation hot path; the in-process :func:`_torch_cuda_state` remains
+    for callers that already hold torch warm.
+    """
+    probe = (
+        "import sys\n"
+        "try:\n"
+        "    import torch\n"
+        "except ImportError:\n"
+        "    sys.stdout.write('missing|'); sys.exit(0)\n"
+        "except Exception as e:\n"
+        "    sys.stdout.write('error|' + repr(e)); sys.exit(0)\n"
+        "v = getattr(torch, '__version__', 'unknown')\n"
+        "cu = getattr(getattr(torch, 'version', None), 'cuda', None)\n"
+        "try:\n"
+        "    ok = bool(torch.cuda.is_available())\n"
+        "except Exception as e:\n"
+        "    sys.stdout.write('cuda_unavailable|%s|%s' % (v, e)); sys.exit(0)\n"
+        "if ok:\n"
+        "    sys.stdout.write('available|%s|%s' % (v, cu)); sys.exit(0)\n"
+        "if cu or ('+cu' in str(v)):\n"
+        "    sys.stdout.write('cuda_unavailable|%s|%s' % (v, cu)); sys.exit(0)\n"
+        "sys.stdout.write('cpu_wheel|%s' % v)\n"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True, text=True, timeout=timeout,
+            **_subprocess_flags(),
+        )
+    except Exception as e:
+        return "error", f"out-of-process torch probe failed: {e}"
+
+    out = (result.stdout or "").strip()
+    state, _, rest = out.partition("|")
+    state = state or "error"
+    detail_map = {
+        "available": f"PyTorch {rest} (CUDA available)",
+        "cuda_unavailable": f"PyTorch CUDA check failed ({rest})",
+        "cpu_wheel": f"PyTorch {rest} is CPU-only",
+        "missing": "PyTorch is not installed",
+        "error": f"PyTorch probe error ({rest or result.stderr[:200]})",
+    }
+    if state not in detail_map:
+        state = "error"
+    return state, detail_map[state]
+
+
+def _cuda_device_name_oop(timeout: float = 120.0) -> tuple[bool, str]:
+    """Out-of-process ``(cuda_available, device_name)`` probe (GIL-free).
+
+    Same rationale as :func:`_torch_cuda_available_oop` — used on the cache-MISS
+    detection path so the cold ``import torch`` runs in a child process and
+    never freezes the Tk UI thread. Returns ``(True, name)`` when CUDA is
+    available, else ``(False, "")``.
+    """
+    probe = (
+        "import sys\n"
+        "try:\n"
+        "    import torch\n"
+        "    if torch.cuda.is_available():\n"
+        "        sys.stdout.write('OK|' + torch.cuda.get_device_name(0))\n"
+        "    else:\n"
+        "        sys.stdout.write('NO|')\n"
+        "except Exception as e:\n"
+        "    sys.stdout.write('ERR|' + repr(e))\n"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True, text=True, timeout=timeout,
+            **_subprocess_flags(),
+        )
+    except Exception:
+        return False, ""
+    out = (result.stdout or "").strip()
+    tag, _, name = out.partition("|")
+    if tag == "OK":
+        return True, (name or "CUDA GPU")
+    return False, ""
+
+
+
 def _fix_pytorch_cuda(python_exe: Optional[str] = None) -> bool:
     """Uninstall CPU-only PyTorch and install CUDA 12.8 version.
 
@@ -519,19 +614,20 @@ def _detect_gpu_impl(auto_fix: bool = False) -> GPUInfo:
         return GPUInfo("cpu", "CPU")
 
     # ── Windows: CUDA > DirectML > CPU ────────────────────────────────────
-    # Try CUDA first (NVIDIA GPUs)
+    # Try CUDA first (NVIDIA GPUs). The torch CUDA probe runs OUT-OF-PROCESS so
+    # a cold `import torch` (which holds the GIL for many seconds on contended
+    # hosts) cannot freeze the Tk UI thread on the cache-miss detection path.
     try:
-        import torch
-        if torch.cuda.is_available():
-            device_name = torch.cuda.get_device_name(0)
-            logger.info(f"Detected CUDA GPU: {device_name}")
-            return GPUInfo("cuda", device_name)
+        cuda_ok, cuda_name = _cuda_device_name_oop()
+        if cuda_ok:
+            logger.info(f"Detected CUDA GPU: {cuda_name}")
+            return GPUInfo("cuda", cuda_name)
     except Exception as e:
         logger.debug(f"CUDA check failed: {e}")
 
     nvidia_name = _nvidia_gpu_present()
     if nvidia_name:
-        torch_state, torch_detail = _torch_cuda_state()
+        torch_state, torch_detail = _torch_cuda_available_oop()
         if torch_state in ("cpu_wheel", "missing"):
             if auto_fix:
                 logger.warning(
@@ -653,13 +749,29 @@ def detect_gpu_cached(
         try:
             if cache_path.is_file():
                 data = json.loads(cache_path.read_text(encoding="utf-8"))
+                # Shape check: a truncated/garbage cache (e.g. interrupted
+                # write, disk corruption) must be a clean miss, not a silent
+                # wrong-GPU answer. Require the dict to carry the keys we read.
+                if not isinstance(data, dict) or "gpu_type" not in data \
+                        or "cached_at_epoch" not in data:
+                    raise ValueError("GPU cache malformed or incomplete")
                 cached_at = float(data.get("cached_at_epoch", 0))
-                age_h = (_time.time() - cached_at) / 3600.0
+                now = _time.time()
+                # Sanity-bound the timestamp: a future-dated (clock jump,
+                # hand-edited typo, bit-flip) or absurdly old stamp would make
+                # the age comparison treat junk as "fresh forever". Reject it.
+                if cached_at > now + 60 or cached_at < now - (400 * 86400):
+                    raise ValueError("GPU cache timestamp out of bounds")
+                age_h = (now - cached_at) / 3600.0
                 gtype = data.get("gpu_type")
                 dname = data.get("device_name", "")
                 cached_gpu_valid = gtype in ("cuda", "mps", "directml") and age_h < ttl_hours
                 if cached_gpu_valid and gtype == "cuda":
-                    torch_state, torch_detail = _torch_cuda_state()
+                    # Validate out-of-process: a cold in-process `import torch`
+                    # here holds the GIL and freezes the Tk UI thread for many
+                    # seconds on contended hosts (the startup-freeze bug). The
+                    # subprocess probe keeps the UI responsive.
+                    torch_state, torch_detail = _torch_cuda_available_oop()
                     if torch_state != "available":
                         cached_gpu_valid = False
                         logger.warning(
