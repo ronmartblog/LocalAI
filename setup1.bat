@@ -110,7 +110,17 @@ if "!SETUP_ALL_FEATURES!"=="1" (
 
 :: ── Pre-flight: Check Windows Installer availability ─────────────────────────
 :: Warn early if another installation is running to save time
-for /f %%i in ('tasklist /FI "IMAGENAME eq msiexec.exe" 2^>nul ^| find /c /i "msiexec.exe"') do set PREFLIGHT_MSI=%%i
+:: PREFLIGHT_MSI MUST be initialized before the for/f. On some managed Windows
+:: hosts the tasklist find pipe fails to spool -- e.g. a redirected TEMP or an
+:: AV/Defender lock on the pipe temp file, the "Unable to read file" symptom --
+:: so the loop body never runs and PREFLIGHT_MSI is left undefined. An undefined
+:: value turns the next test into an empty comparison that aborts the ENTIRE
+:: script with the fatal cmd parser error "0 was unexpected at this time." and
+:: exits 255 right after GPU detection on no-GPU SKUs. Defaulting to 0 keeps the
+:: preflight best-effort.
+set "PREFLIGHT_MSI=0"
+for /f %%i in ('tasklist /FI "IMAGENAME eq msiexec.exe" 2^>nul ^| find /c /i "msiexec.exe"') do set "PREFLIGHT_MSI=%%i"
+if not defined PREFLIGHT_MSI set "PREFLIGHT_MSI=0"
 if %PREFLIGHT_MSI% gtr 0 (
     echo [WARNING] Detected %PREFLIGHT_MSI% active Windows Installer process^(es^).
     echo           Setup may fail if another installation is in progress.
@@ -841,7 +851,12 @@ echo.
 
 REM Check if msiexec processes are running
 set MSI_RUNNING=0
-for /f %%i in ('tasklist /FI "IMAGENAME eq msiexec.exe" 2^>nul ^| find /c /i "msiexec.exe"') do set MSI_COUNT=%%i
+REM MSI_COUNT initialized for the same reason as PREFLIGHT_MSI above: a failed
+REM tasklist find pipe must not leave it undefined or the next numeric test
+REM aborts with "0 was unexpected at this time."
+set "MSI_COUNT=0"
+for /f %%i in ('tasklist /FI "IMAGENAME eq msiexec.exe" 2^>nul ^| find /c /i "msiexec.exe"') do set "MSI_COUNT=%%i"
+if not defined MSI_COUNT set "MSI_COUNT=0"
 if %MSI_COUNT% gtr 0 (
     echo Found %MSI_COUNT% msiexec.exe process^(es^) running:
     tasklist /FI "IMAGENAME eq msiexec.exe" /FO TABLE 2>nul | findstr /V "Image"
