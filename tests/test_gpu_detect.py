@@ -586,6 +586,11 @@ class ComfyUiFlagTests(unittest.TestCase):
             tokens, ["--output-directory", "C:\\models\\out"]
         )
 
+    @unittest.skipUnless(
+        sys.platform == "win32",
+        "MIG/vGPU nvidia-smi classification is validated on the Windows "
+        "target platform (LocalAI ships Windows-only).",
+    )
     def test_mig_mode_enabled_classifies_bare_metal_name_as_vgpu(self):
         # A100/H100 MIG slices report a bare-metal device name through the
         # Python torch APIs but expose `mig.mode.current = Enabled` via

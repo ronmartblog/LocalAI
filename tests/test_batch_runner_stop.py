@@ -1166,6 +1166,10 @@ class BatchRunnerStopTests(unittest.TestCase):
             "benchmark_skip_methods": ["ollama_cpu", "onnx_cpu"],
         }
         runner = BatchRunner(skip_onnx=True)
+        # On GPU-less hosts (e.g. CI runners) the live capacity probe reports
+        # has_gpu=False / 0 VRAM, which drops ollama_gpu. Pin a GPU-capable
+        # capacity so this asserts the skip-method filtering, not host hardware.
+        runner._benchmark_capacity = lambda: (64.0, True, 24.0, False)
 
         self.assertEqual(runner._methods_for(model), ["ollama_gpu"])
 

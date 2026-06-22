@@ -414,8 +414,10 @@ class RemovableDriveProbeTests(unittest.TestCase):
         # Any exception in the ctypes probe must yield False — a missed
         # removable note is strictly better than a false positive.
         with patch.object(app_module.sys, "platform", "win32"):
-            # Force the import or ctypes call to blow up
-            with patch("ctypes.windll", side_effect=RuntimeError("no windll")):
+            # Force the import or ctypes call to blow up. create=True lets this
+            # patch the Windows-only ctypes.windll attribute even when the suite
+            # runs on a non-Windows host (where ctypes has no windll).
+            with patch("ctypes.windll", side_effect=RuntimeError("no windll"), create=True):
                 self.assertFalse(self.app._app_drive_is_removable())
 
 

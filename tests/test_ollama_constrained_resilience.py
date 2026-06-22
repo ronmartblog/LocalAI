@@ -89,7 +89,11 @@ class ConstrainedVmDetectionTests(unittest.TestCase):
 
     def test_cpc_computer_name_pattern_is_managed_vm_signal(self):
         """CPC-<user>-<id> is a common managed-VM host naming convention."""
-        with patch.dict(os.environ, {"COMPUTERNAME": "CPC-host01-4SOV0"}, clear=False):
+        # _looks_like_managed_vm() short-circuits to False off win32 (the
+        # signal is Windows-only), so pin the platform to exercise the
+        # COMPUTERNAME branch regardless of the host the suite runs on.
+        with patch.object(constrained_env.sys, "platform", "win32"), \
+             patch.dict(os.environ, {"COMPUTERNAME": "CPC-host01-4SOV0"}, clear=False):
             self.assertTrue(constrained_env._looks_like_managed_vm())
 
     def test_detection_is_cached_across_calls(self):

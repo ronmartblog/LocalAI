@@ -27,6 +27,9 @@ class ToolboxWorkflowTests(unittest.TestCase):
         self.assertEqual(result.metadata["elapsed_s"], 0.1)
 
     def test_embed_and_rank_returns_dataclass(self):
+        import importlib.util
+        if importlib.util.find_spec("torch") is None:
+            self.skipTest("torch is an optional dependency and is not installed")
         class FakeVector:
             def __init__(self, score):
                 self.score = score
